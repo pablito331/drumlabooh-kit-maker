@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drumlabooh Kit Maker</title>
+<style>
+  :root { --bg:#f6f6f8; --card:#fff; --fg:#1d1d22; --mut:#76767f; --line:#dcdce2; --acc:#2f7d4f; --acc-fg:#fff; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17171b; --card:#212127; --fg:#ececf1; --mut:#9a9aa6; --line:#34343c; --acc:#4cae78; --acc-fg:#0e1a13; --warn:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header, main { max-width: 980px; margin: 0 auto; padding: 14px 16px; }
+  h1 { font-size: 20px; margin: 6px 0 2px; }
+  .sub { color: var(--mut); margin: 0 0 8px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:12px; }
+  .bar label { display:flex; gap:6px; align-items:center; color:var(--mut); }
+  button, select, input { font:inherit; color:inherit; }
+  button { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 10px; cursor:pointer; }
+  button:hover { border-color: var(--acc); }
+  button.primary { background:var(--acc); color:var(--acc-fg); border-color:var(--acc); font-weight:600; }
+  input[type=text], input[type=number], select { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  .spacer { flex:1; }
+  .slot { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:8px; }
+  .slot.drop { border-color: var(--acc); box-shadow: 0 0 0 2px var(--acc) inset; }
+  .slot.empty { opacity:.78; }
+  .head { display:grid; grid-template-columns: 64px 44px 1fr 170px auto auto; gap:8px; align-items:center; }
+  .head input[type=number] { width:64px; }
+  .key { color:var(--mut); text-align:center; font-variant-numeric: tabular-nums; }
+  .count { color:var(--mut); min-width:72px; text-align:right; }
+  .files { margin:6px 0 0 0; padding:0; list-style:none; }
+  .files li { display:flex; align-items:center; gap:6px; padding:3px 0; border-top:1px dashed var(--line); }
+  .files .fn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .files .idx { color:var(--mut); width:22px; text-align:right; }
+  .mini { padding:2px 8px; }
+  .note { color:var(--mut); font-size:13px; margin:8px 0 14px; }
+  .warn { color:var(--warn); }
+  .imgbox { display:flex; align-items:center; gap:10px; }
+  .imgbox img { height:44px; border-radius:6px; border:1px solid var(--line); }
+  @media (max-width:720px) { .head { grid-template-columns: 64px 1fr; } .head .key{display:none} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Drumlabooh Kit Maker</h1>
+  <p class="sub">Monte o kit no navegador, escolha o mapeamento MIDI e baixe um .zip pronto (samples + drumkit.txt + imagem). Nada é enviado para servidor.</p>
+</header>
+
+<main>
+  <div class="bar">
+    <label>Mapeamento
+      <select id="preset"></select>
+    </label>
+    <button id="applyPreset">Aplicar</button>
+    <button id="newSlot">+ Novo slot</button>
+    <label><input type="checkbox" id="onlyFilled"> só slots com samples</label>
+    <span class="spacer"></span>
+    <span id="status" class="sub"></span>
+  </div>
+
+  <div class="bar">
+    <label>Nome do kit <input type="text" id="kitName" value="MeuKit" size="18"></label>
+    <div class="imgbox">
+      <button id="pickImage">Imagem do kit...</button>
+      <img id="imgPrev" alt="" hidden>
+      <span id="imgName" class="sub" style="margin:0">(sem imagem)</span>
+      <button id="clearImage" class="mini" hidden>✕</button>
+    </div>
+    <span class="spacer"></span>
+    <button id="export" class="primary">Baixar kit (.zip)</button>
+  </div>
+
+  <div id="list"></div>
+
+  <p class="note">
+    Várias camadas no mesmo slot: a ordem da lista vai do <b>mais fraco ao mais forte</b> (modo Velocity).
+    Para variações da mesma batida use <b>Aleatório</b> (<code>*</code>) ou <b>Round robin</b> (<code>&gt;</code>).
+    Arraste arquivos de áudio direto sobre um slot para adicioná-los. Nada fica salvo ao fechar a página.
+  </p>
+</main>
+
+<input type="file" id="audioInput" accept="audio/*,.wav,.flac,.ogg,.mp3,.aif,.aiff" multiple hidden>
+<input type="file" id="imageInput" accept="image/png,image/jpeg" hidden>
+
+<script>
+"use strict";
+
+/* ---------- Presets (nota MIDI, nome) ---------- */
+const GM_DRUMS = [
+  [35,"Acoustic Bass Drum"],[36,"Kick"],[37,"Sidestick"],[38,"Snare"],[39,"Hand Clap"],
+  [40,"Rimshot / Snare 2"],[41,"Floor Tom Low"],[42,"Hihat Closed"],[43,"Floor Tom High"],
+  [44,"Hihat Pedal"],[45,"Tom Low"],[46,"Hihat Open"],[47,"Tom Low-Mid"],[48,"Tom Hi-Mid"],
+  [49,"Crash 1"],[50,"Tom High"],[51,"Ride"],[52,"China"],[53,"Ride Bell"],[54,"Tambourine"],
+  [55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],[59,"Ride 2"]
+];
+const GM_PERC = [
+  [60,"Hi Bongo"],[61,"Low Bongo"],[62,"Mute Hi Conga"],[63,"Open Hi Conga"],[64,"Low Conga"],
+  [65,"High Timbale"],[66,"Low Timbale"],[67,"High Agogo"],[68,"Low Agogo"],[69,"Cabasa"],
+  [70,"Maracas"],[71,"Short Whistle"],[72,"Long Whistle"],[73,"Short Guiro"],[74,"Long Guiro"],
+  [75,"Claves"],[76,"Hi Wood Block"],[77,"Low Wood Block"],[78,"Mute Cuica"],[79,"Open Cuica"],
+  [80,"Mute Triangle"],[81,"Open Triangle"]
+];
+const AVL = [
+  [36,"Kick Drum"],[37,"Snare Side Stick"],[38,"Snare Center"],[39,"Hand Clap"],[40,"Snare Edge"],
+  [41,"Floor Tom Center"],[42,"Closed HiHat"],[43,"Floor Tom Edge"],[44,"Pedal HiHat"],
+  [45,"Tom Center"],[46,"Semi-Open HiHat"],[47,"Tom Edge"],[48,"Swish HiHat"],
+  [49,"Crash Cymbal 1 (left)"],[50,"Crash Cymbal 1 Choked"],[51,"Ride Cymbal Tip"],
+  [52,"Ride Cymbal Choked"],[53,"Ride Cymbal Bell"],[54,"Tambourine"],[55,"Splash Cymbal"],
+  [56,"Cowbell"],[57,"Crash Cymbal 2 (right)"],[58,"Crash Cymbal 2 Choked"],
+  [59,"Ride Cymbal Shank"],[60,"Crash Cymbal 3"],[61,"Maracas"]
+];
+const PRESETS = {
+  "GM bateria (35-59) - mais compatível": GM_DRUMS,
+  "GM completo (35-81)": GM_DRUMS.concat(GM_PERC),
+  "AVL Drumkits (36-61)": AVL,
+  "Vazio (monto do zero)": []
+};
+
+/* Prefixo de modo das camadas no drumkit.txt do Drumlabooh */
+const MODES = [
+  ["",  "Velocity (fraco → forte)"],
+  [">", "Round robin"],
+  ["*", "Aleatório"],
+  ["^", "Velocity só escolhe camada"]
+];
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const noteLabel = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);   // 36 = C2
+
+/* ---------- Estado ---------- */
+let slots = [];
+let image = null;
+let nextId = 1;
+let targetSlotId = null;
+
+const $ = s => document.querySelector(s);
+const newSlot = (note, name, files = [], mode = "") => ({ id: nextId++, note, name, mode, files });
+const fromPreset = p => p.map(([n, name]) => newSlot(n, name));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cleanName = s => (s.replace(/[=\r\n]/g, " ").trim()) || "Sem nome";
+const safeFile  = s => s.replace(/[,\[\]=\r\n\\\/:*?"<>|]/g, "_");
+
+/* ---------- Render ---------- */
+function render() {
+  slots.sort((a, b) => a.note - b.note);
+  const only = $("#onlyFilled").checked;
+  const list = $("#list");
+  list.innerHTML = "";
+  const dup = duplicateNotes();
+
+  for (const s of slots) {
+    if (only && !s.files.length) continue;
+    const el = document.createElement("div");
+    el.className = "slot" + (s.files.length ? "" : " empty");
+    el.dataset.id = s.id;
+    const modeOpts = MODES.map(([v, t]) => `<option value="${esc(v)}"${v === s.mode ? " selected" : ""}>${esc(t)}</option>`).join("");
+    const isDup = dup.includes(s.note) && s.files.length;
+    el.innerHTML = `
+      <div class="head">
+        <input type="number" min="0" max="127" value="${s.note}" data-field="note" title="Nota MIDI${isDup ? " (duplicada!)" : ""}" ${isDup ? 'class="warn"' : ""}>
+        <span class="key">${noteLabel(s.note)}</span>
+        <input type="text" value="${esc(s.name)}" data-field="name">
+        <select data-field="mode" title="Como as camadas do slot são escolhidas">${modeOpts}</select>
+        <button data-act="add">+ samples</button>
+        <span class="count">${s.files.length ? s.files.length + (s.files.length > 1 ? " camadas" : " sample") : "vazio"}
+          <button class="mini" data-act="del" title="Excluir slot">✕</button></span>
+      </div>
+      ${s.files.length ? `<ul class="files">${s.files.map((f, i) => `
+        <li data-i="${i}">
+          <span class="idx">${i + 1}</span>
+          <button class="mini" data-act="play" title="Ouvir">▶</button>
+          <span class="fn" title="${esc(f.name)}">${esc(f.name)}</span>
+          <button class="mini" data-act="up" title="Subir">↑</button>
+          <button class="mini" data-act="down" title="Descer">↓</button>
+          <button class="mini" data-act="rm" title="Remover">✕</button>
+        </li>`).join("")}</ul>` : ""}`;
+    list.appendChild(el);
+  }
+  const filled = slots.filter(s => s.files.length).length;
+  $("#status").textContent = `${filled} de ${slots.length} slots com samples` + (dup.length ? ` · notas duplicadas: ${dup.join(", ")}` : "");
+}
+
+function duplicateNotes() {
+  const seen = new Set(), dup = new Set();
+  for (const s of slots) if (s.files.length) { if (seen.has(s.note)) dup.add(s.note); seen.add(s.note); }
+  return [...dup].sort((a, b) => a - b);
+}
+
+/* ---------- Eventos ---------- */
+const slotOf = el => slots.find(s => s.id === Number(el.closest(".slot").dataset.id));
+
+$("#list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const s = slotOf(b), act = b.dataset.act;
+  const li = b.closest("li"), i = li ? Number(li.dataset.i) : -1;
+  if (act === "add") { targetSlotId = s.id; $("#audioInput").click(); return; }
+  if (act === "del") { if (confirm(`Excluir o slot "${s.name}"?`)) slots = slots.filter(x => x !== s); }
+  if (act === "rm") s.files.splice(i, 1);
+  if (act === "up" && i > 0) [s.files[i - 1], s.files[i]] = [s.files[i], s.files[i - 1]];
+  if (act === "down" && i < s.files.length - 1) [s.files[i + 1], s.files[i]] = [s.files[i], s.files[i + 1]];
+  if (act === "play") { play(s.files[i]); return; }
+  render();
+});
+
+$("#list").addEventListener("change", e => {
+  const f = e.target.dataset.field;
+  if (!f) return;
+  const s = slotOf(e.target);
+  if (f === "note") s.note = Math.min(127, Math.max(0, parseInt(e.target.value, 10) || 0));
+  if (f === "name") s.name = cleanName(e.target.value);
+  if (f === "mode") s.mode = e.target.value;
+  render();
+});
+
+/* arrastar e soltar arquivos sobre um slot */
+const list = $("#list");
+list.addEventListener("dragover", e => { const el = e.target.closest(".slot"); if (el) { e.preventDefault(); el.classList.add("drop"); } });
+list.addEventListener("dragleave", e => { const el = e.target.closest(".slot"); if (el) el.classList.remove("drop"); });
+list.addEventListener("drop", e => {
+  const el = e.target.closest(".slot");
+  if (!el) return;
+  e.preventDefault();
+  el.classList.remove("drop");
+  addFiles(slotOf(el), e.dataTransfer.files);
+});
+
+function addFiles(s, fileList) {
+  const audio = [...fileList].filter(f => f.type.startsWith("audio/") || /\.(wav|flac|ogg|mp3|aiff?)$/i.test(f.name));
+  audio.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  for (const f of audio) s.files.push(f);
+  render();
+}
+
+$("#audioInput").addEventListener("change", e => {
+  const s = slots.find(x => x.id === targetSlotId);
+  if (s) addFiles(s, e.target.files);
+  e.target.value = "";
+});
+
+/* pré-escuta */
+let audio = null, audioURL = null;
+function play(file) {
+  if (audio) audio.pause();
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = URL.createObjectURL(file);
+  audio = new Audio(audioURL);
+  audio.play().catch(() => alert("O navegador não conseguiu tocar este arquivo."));
+}
+
+/* presets e novos slots */
+for (const name of Object.keys(PRESETS)) $("#preset").add(new Option(name, name));
+
+$("#applyPreset").addEventListener("click", () => {
+  const fresh = fromPreset(PRESETS[$("#preset").value]);
+  const byNote = new Map(fresh.map(s => [s.note, s]));
+  const extra = [];
+  for (const old of slots) {
+    if (!old.files.length) continue;
+    const t = byNote.get(old.note);
+    if (t) { t.files = old.files; t.mode = old.mode; } else extra.push(old);   // fora do preset: vira slot extra
+  }
+  slots = fresh.concat(extra);
+  render();
+});
+
+$("#newSlot").addEventListener("click", () => {
+  const n = parseInt(prompt("Nota MIDI (0-127):", "60"), 10);
+  if (isNaN(n) || n < 0 || n > 127) return;
+  const name = prompt("Nome do instrumento:", "Novo instrumento");
+  if (!name) return;
+  slots.push(newSlot(n, cleanName(name)));
+  render();
+});
+
+$("#onlyFilled").addEventListener("change", render);
+
+/* imagem */
+$("#pickImage").addEventListener("click", () => $("#imageInput").click());
+$("#imageInput").addEventListener("change", e => {
+  image = e.target.files[0] || null;
+  e.target.value = "";
+  showImage();
+});
+$("#clearImage").addEventListener("click", () => { image = null; showImage(); });
+function showImage() {
+  const img = $("#imgPrev");
+  if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+  if (image) { img.src = URL.createObjectURL(image); img.hidden = false; }
+  else { img.removeAttribute("src"); img.hidden = true; }
+  $("#imgName").textContent = image ? image.name : "(sem imagem)";
+  $("#clearImage").hidden = !image;
+}
+
+/* ---------- ZIP (sem compressão, sem bibliotecas) ---------- */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+async function makeZip(entries) {          // entries: [{name, data: Uint8Array | File}]
+  const enc = new TextEncoder(), parts = [], central = [];
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  let offset = 0;
+
+  for (const e of entries) {
+    const data = e.data instanceof Uint8Array ? e.data : new Uint8Array(await e.data.arrayBuffer());
+    const name = enc.encode(e.name), crc = crc32(data), len = data.length;
+
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint16(8, 0, true); h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true);
+    h.setUint32(14, crc, true); h.setUint32(18, len, true); h.setUint32(22, len, true);
+    h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+    parts.push(h.buffer, name, data);
+
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true);
+    c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true); c.setUint16(12, dosTime, true);
+    c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, len, true);
+    c.setUint32(24, len, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+    central.push(c.buffer, name);
+
+    offset += 30 + name.length + len;
+  }
+  const cdSize = central.reduce((a, p) => a + p.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true);
+  end.setUint16(10, entries.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+}
+
+/* ---------- Exportar ---------- */
+$("#export").addEventListener("click", async () => {
+  const filled = slots.filter(s => s.files.length);
+  if (!filled.length) return alert("Nenhum slot tem samples ainda.");
+  const dup = duplicateNotes();
+  if (dup.length && !confirm(`Há mais de um slot com samples nas notas ${dup.join(", ")}. Só um deles vai tocar. Exportar assim mesmo?`)) return;
+
+  const kit = safeFile($("#kitName").value.trim()) || "MeuKit";
+  const used = new Map(), entries = [], lines = [];
+
+  for (const s of [...filled].sort((a, b) => a.note - b.note)) {
+    const refs = [];
+    for (const f of s.files) {
+      let dest = safeFile(f.name);
+      const dot = dest.lastIndexOf("."), stem = dot > 0 ? dest.slice(0, dot) : dest, ext = dot > 0 ? dest.slice(dot) : "";
+      for (let i = 2; used.has(dest) && used.get(dest) !== f; i++) dest = `${stem}_${i}${ext}`;
+      if (!used.has(dest)) { used.set(dest, f); entries.push({ name: `${kit}/${dest}`, data: f }); }
+      refs.push(dest);
+    }
+    lines.push(`[${s.note}]${s.mode}${cleanName(s.name)}=${refs.join(",")}`);
+  }
+  entries.unshift({ name: `${kit}/drumkit.txt`, data: new TextEncoder().encode(lines.join("\n") + "\n") });
+  if (image) {
+    const ext = /\.png$/i.test(image.name) || image.type === "image/png" ? "png" : "jpg";
+    entries.push({ name: `${kit}/image.${ext}`, data: image });
+  }
+
+  const btn = $("#export");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  try {
+    const blob = await makeZip(entries);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = kit + ".zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (err) {
+    alert("Erro ao gerar o zip: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Baixar kit (.zip)";
+  }
+});
+
+/* início */
+slots = fromPreset(GM_DRUMS);
+render();
+</script>
+</body>
+</html>
