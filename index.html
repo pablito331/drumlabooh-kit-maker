@@ -110,10 +110,69 @@ const AVL = [
   [56,"Cowbell"],[57,"Crash Cymbal 2 (right)"],[58,"Crash Cymbal 2 Choked"],
   [59,"Ride Cymbal Shank"],[60,"Crash Cymbal 3"],[61,"Maracas"]
 ];
+const BFD = [
+  [35,"Kick 1"],[36,"Kick 2"],[37,"Stick"],[38,"Snare"],[39,"Clap"],[40,"Snare Rim"],
+  [41,"Low Tom"],[42,"Closed HH"],[43,"Mid Tom"],[44,"Pedal HH"],[45,"High Tom"],[46,"Open HH"],
+  [47,"Floor Tom"],[48,"Tom 5"],[49,"Crash 1"],[50,"Crash 1 Choke"],[51,"Ride"],[52,"China"],
+  [53,"Ride Bell"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],
+  [59,"Ride 2"],[60,"Hi Bongo"],[61,"Low Bongo"],[62,"Hi Conga"],[63,"Low Conga"],[64,"Timbale"],
+  [65,"Hi Agogo"],[66,"Low Agogo"],[67,"Cabasa"],[68,"Maracas"],[69,"Shaker"],[70,"Guiro"],
+  [71,"Claves"],[72,"Wood Block"],[73,"Cuica"],[74,"Triangle"]
+];
+const EZDRUMMER = [
+  [35,"Kick"],[36,"Kick Alt"],[37,"Stick"],[38,"Snare"],[39,"Clap"],[40,"Snare Rim"],
+  [41,"Low Tom"],[42,"Closed HH"],[43,"Mid Tom"],[44,"Pedal HH"],[45,"High Tom"],[46,"Open HH"],
+  [47,"Floor Tom"],[48,"Tom 5"],[49,"Crash 1"],[50,"Crash Choke"],[51,"Ride"],[52,"China"],
+  [53,"Ride Bell"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],
+  [59,"Ride 2"],[60,"Hi Bongo"],[61,"Low Bongo"],[62,"Conga Mute"],[63,"Conga Open"],[64,"Timbale"],
+  [65,"Agogo"],[66,"Cabasa"],[67,"Maracas"],[68,"Shaker"],[69,"Guiro"],[70,"Claves"],
+  [71,"Wood Block"],[72,"Cuica"],[73,"Triangle"]
+];
+const ADDICTIVE_DRUMS = [
+  [35,"Kick"],[36,"Kick Round"],[37,"Stick"],[38,"Snare"],[39,"Clap"],[40,"Snare Edge"],
+  [41,"Low Tom"],[42,"Closed HH"],[43,"Mid Tom"],[44,"Pedal HH"],[45,"High Tom"],[46,"Open HH"],
+  [47,"Floor Tom"],[48,"Rack Tom"],[49,"Crash"],[50,"Crash Choke"],[51,"Ride"],[52,"Ride Bell"],
+  [53,"China"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],
+  [59,"Ride 2"],[60,"Bongo"],[61,"Bongo Low"],[62,"Conga Mute"],[63,"Conga Open"],[64,"Cuica"],
+  [65,"Wood Block"],[66,"Guiro"],[67,"Cabasa"],[68,"Shaker"],[69,"Agogo"],[70,"Triangle"],
+  [71,"Maracas"],[72,"Claves"]
+];
+const DRUMLABOOH_AUTO = [
+  [36,"Kick"],[38,"Snare"],[40,"Snare Rim"],[41,"Low Tom"],[42,"HiHat Closed"],[43,"Mid Tom"],
+  [44,"HiHat Pedal"],[45,"Hi Tom"],[46,"HiHat Open"],[47,"Floor Tom"],[49,"Crash 1"],[50,"Crash 1 Choke"],
+  [51,"Ride"],[52,"China"],[53,"Ride Bell"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],
+  [57,"Crash 2"],[58,"Vibraslap"],[59,"Ride 2"],[60,"Hi Bongo"],[61,"Low Bongo"],[62,"Hi Conga"],
+  [63,"Low Conga"],[64,"Timbale"],[65,"Agogo"],[66,"Cabasa"],[67,"Maracas"],[68,"Shaker"],
+  [69,"Guiro"],[70,"Claves"],[71,"Wood Block"],[72,"Cuica"],[73,"Triangle"]
+];
+const MTPOWERS = [
+  [35,"Kick 1"],[36,"Kick 2"],[37,"Stick"],[38,"Snare"],[39,"Clap"],[40,"Snare Rim"],
+  [41,"Low Tom"],[42,"Closed HH"],[43,"Mid Tom"],[44,"Pedal HH"],[45,"Hi Tom"],[46,"Open HH"],
+  [47,"Floor Tom"],[48,"Rack Tom"],[49,"Crash 1"],[50,"Crash Choke"],[51,"Ride"],[52,"China"],
+  [53,"Ride Bell"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],
+  [59,"Ride 2"],[60,"Hi Bongo"],[61,"Low Bongo"],[62,"Hi Conga"],[63,"Low Conga"],[64,"Timbale"],
+  [65,"Hi Agogo"],[66,"Low Agogo"],[67,"Cabasa"],[68,"Maracas"],[69,"Shaker"],[70,"Guiro"],
+  [71,"Claves"],[72,"Wood Block"],[73,"Cuica"],[74,"Triangle"]
+];
+const SUPERIOR_DRUMMER = [
+  [35,"Kick"],[36,"Kick 2"],[37,"Stick"],[38,"Snare"],[39,"Clap"],[40,"Snare Rim"],
+  [41,"Low Tom"],[42,"Closed HH"],[43,"Mid Tom"],[44,"Pedal HH"],[45,"High Tom"],[46,"Open HH"],
+  [47,"Floor Tom"],[48,"Tom 5"],[49,"Crash 1"],[50,"Crash 1 Choke"],[51,"Ride"],[52,"China"],
+  [53,"Ride Bell"],[54,"Tambourine"],[55,"Splash"],[56,"Cowbell"],[57,"Crash 2"],[58,"Vibraslap"],
+  [59,"Ride 2"],[60,"Bongo"],[61,"Bongo Low"],[62,"Conga Mute"],[63,"Conga Open"],[64,"Timbale"],
+  [65,"Agogo"],[66,"Cabasa"],[67,"Maracas"],[68,"Shaker"],[69,"Guiro"],[70,"Claves"],
+  [71,"Wood Block"],[72,"Cuica"],[73,"Triangle"]
+];
 const PRESETS = {
   "GM bateria (35-59) - mais compatível": GM_DRUMS,
   "GM completo (35-81)": GM_DRUMS.concat(GM_PERC),
   "AVL Drumkits (36-61)": AVL,
+  "BFD": BFD,
+  "EZ Drummer": EZDRUMMER,
+  "Addictive Drums": ADDICTIVE_DRUMS,
+  "MTPowerDrumKit": MTPOWERS,
+  "Superior Drummer": SUPERIOR_DRUMMER,
+  "Drumlabooh Automático": DRUMLABOOH_AUTO,
   "Vazio (monto do zero)": []
 };
 
@@ -253,15 +312,20 @@ function play(file) {
 for (const name of Object.keys(PRESETS)) $("#preset").add(new Option(name, name));
 
 $("#applyPreset").addEventListener("click", () => {
-  const fresh = fromPreset(PRESETS[$("#preset").value]);
-  const byNote = new Map(fresh.map(s => [s.note, s]));
-  const extra = [];
+  const selected = PRESETS[$("#preset").value] || [];
+  const matchingByNote = new Map();
   for (const old of slots) {
-    if (!old.files.length) continue;
-    const t = byNote.get(old.note);
-    if (t) { t.files = old.files; t.mode = old.mode; } else extra.push(old);   // fora do preset: vira slot extra
+    if (!matchingByNote.has(old.note)) matchingByNote.set(old.note, old);
   }
-  slots = fresh.concat(extra);
+
+  const nextSlots = [];
+  for (const [note, name] of selected) {
+    const previous = matchingByNote.get(note);
+    const slot = newSlot(note, name, previous ? previous.files.slice() : [], previous ? previous.mode : "");
+    nextSlots.push(slot);
+  }
+
+  slots = nextSlots;
   render();
 });
 

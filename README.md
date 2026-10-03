@@ -8,7 +8,7 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
 
 ## Funcionalidades
 
-- Mapeamento MIDI por presets GM e AVL
+- Mapeamento MIDI por presets GM, AVL, BFD, EZ Drummer, Addictive Drums e Drumlabooh Automático
 - Criação e edição de slots por nota
 - Adição de múltiplos samples por slot
 - Ordenação de camadas por intensidade, round robin e aleatório
