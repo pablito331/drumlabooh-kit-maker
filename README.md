@@ -8,7 +8,7 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
 
 ## Funcionalidades
 
-- Mapeamento MIDI por presets GM, AVL, BFD, EZ Drummer, Addictive Drums e Drumlabooh Automático
+- Mapeamento de percussão General MIDI padrão (notas 35-81)
 - Criação e edição de slots por nota
 - Adição de múltiplos samples por slot
 - Ordenação de camadas por intensidade, round robin e aleatório
@@ -19,19 +19,24 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
 ## Como usar
 
 1. Abra o arquivo `index.html` no navegador.
-2. Escolha um preset de mapeamento MIDI.
-3. Ajuste as notas, nomes e modos dos slots.
-4. Arraste seus arquivos de áudio para cada slot.
-5. Opcionalmente, adicione uma imagem do kit.
-6. Clique em `Baixar kit (.zip)`.
+2. Use o mapeamento de percussão General MIDI padrão (notas 35-81). Outros padrões poderão ser importados em uma versão futura.
+3. Clique em `Aplicar` para ativar o mapeamento escolhido.
+4. Clique em `Importar kit SFZ / Hydrogen...` e escolha selecionar arquivos ou uma pasta descompactada. Para SFZ, selecione o `.sfz` junto com os samples referenciados. Para Hydrogen, selecione o `.h2drumkit`/ZIP ou a pasta com `drumkit.xml` e os samples. A importação acontece no navegador.
+5. Os samples são associados à peça mais compatível no mapeamento General MIDI, usando o nome do instrumento e a nota MIDI em conjunto. No SFZ, as regiões e faixas de velocidade são usadas para ordenar as camadas. Kits Hydrogen usam o nome, `midiOutNote` e as camadas do `drumkit.xml`. Se o nome e a nota indicarem articulações diferentes, a peça aparece em uma janela para você escolher o slot ou ignorá-la.
+6. Ajuste notas, nomes e modos dos slots. Quando houver várias camadas, edite os limites mínimo e máximo de velocity nos campos de cada sample. Use as setas `↑` e `↓` ou arraste um sample para reordenar as camadas; arraste-o para outro slot para movê-lo. As faixas de velocity acompanham cada sample. Também é possível arrastar arquivos de áudio do computador para um slot.
+7. Opcionalmente, adicione uma imagem do kit.
+8. Clique em `Baixar kit (.zip)`.
 
 ## Estrutura do pacote exportado
 
 O ZIP gerado contém:
 
 - `drumkit.txt` com o mapeamento final
+- `drumkit.sfz` com as faixas de velocity preservadas para abrir diretamente no Drumlabooh
 - arquivos de áudio organizados por nome
 - imagem do kit, quando houver
+
+O formato `drumkit.txt` reparte as velocidades igualmente entre as camadas. Para manter as faixas originais importadas de SFZ ou Hydrogen, abra o `drumkit.sfz` gerado.
 
 ## GitHub Pages
 
