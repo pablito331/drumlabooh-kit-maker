@@ -53,6 +53,14 @@ O formato `drumkit.txt` reparte as velocidades igualmente entre as camadas. Para
 
 Este projeto foi pensado para funcionar localmente e em páginas estáticas. Ele não depende de backend e não armazena dados em um servidor.
 
+## Estrutura dos arquivos
+
+- `index.html` contém a estrutura da página.
+- `styles.css` contém os estilos da interface.
+- `app.js` contém a lógica do aplicativo.
+
+Os três arquivos ficam na mesma pasta para que o app continue funcionando ao abrir `index.html` diretamente ou ao publicá-lo em uma hospedagem estática.
+
 ## Licença
 
 Este projeto está disponível para uso pessoal e estudo. Ajuste a licença conforme sua necessidade antes de publicar em produção ou distribuir publicamente.

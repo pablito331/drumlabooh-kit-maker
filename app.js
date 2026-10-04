@@ -1,0 +1,1249 @@
+"use strict";
+
+/* ---------- Presets (nota MIDI, nome) ---------- */
+const GM_DRUMS = [
+  [35,"Acoustic Bass Drum"],[36,"Bass Drum 1"],[37,"Side Stick"],[38,"Acoustic Snare"],[39,"Hand Clap"],
+  [40,"Electric Snare"],[41,"Low Floor Tom"],[42,"Closed Hi-Hat"],[43,"High Floor Tom"],
+  [44,"Pedal Hi-Hat"],[45,"Low Tom"],[46,"Open Hi-Hat"],[47,"Low-Mid Tom"],[48,"Hi-Mid Tom"],
+  [49,"Crash Cymbal 1"],[50,"High Tom"],[51,"Ride Cymbal 1"],[52,"Chinese Cymbal"],[53,"Ride Bell"],[54,"Tambourine"],
+  [55,"Splash Cymbal"],[56,"Cowbell"],[57,"Crash Cymbal 2"],[58,"Vibraslap"],[59,"Ride Cymbal 2"],
+  [60,"Hi Bongo"],[61,"Low Bongo"],[62,"Mute Hi Conga"],[63,"Open Hi Conga"],[64,"Low Conga"],
+  [65,"High Timbale"],[66,"Low Timbale"],[67,"High Agogo"],[68,"Low Agogo"],[69,"Cabasa"],
+  [70,"Maracas"],[71,"Short Whistle"],[72,"Long Whistle"],[73,"Short Guiro"],[74,"Long Guiro"],
+  [75,"Claves"],[76,"Hi Wood Block"],[77,"Low Wood Block"],[78,"Mute Cuica"],[79,"Open Cuica"],
+  [80,"Mute Triangle"],[81,"Open Triangle"]
+];
+const PRESETS = {
+  "General MIDI (GM) - Percussion 35-81": GM_DRUMS,
+  "Personalizado - começar vazio": []
+};
+
+/* Prefixo de modo das camadas no drumkit.txt do Drumlabooh */
+const MODES = [
+  ["",  "Velocity (fraco → forte)"],
+  [">", "Round robin"],
+  ["*", "Aleatório"],
+  ["^", "Velocity só escolhe camada"]
+];
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const noteLabel = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);   // 36 = C2
+const MAX_LAYERS_PER_SLOT = 7;
+
+/* ---------- Estado ---------- */
+let slots = [];
+let image = null;
+let nextId = 1;
+let targetSlotId = null;
+let draggedSample = null;
+
+const $ = s => document.querySelector(s);
+const newSlot = (note, name, files = [], mode = "", velocityRanges = [], sfzVariants = []) => ({
+  id: nextId++, note, name, mode, files,
+  velocityRanges: files.map((_, i) => velocityRanges[i] || null),
+  sfzVariants: files.map((_, i) => sfzVariants[i] || null)
+});
+const fromPreset = p => p.map(([n, name]) => newSlot(n, name));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cleanName = s => (s.replace(/[=\r\n]/g, " ").trim()) || "Sem nome";
+const safeFile  = s => s.replace(/[,\[\]=\r\n\\\/:*?"<>|]/g, "_");
+
+/* ---------- Render ---------- */
+function render() {
+  slots.sort((a, b) => a.note - b.note);
+  const only = $("#onlyFilled").checked;
+  const list = $("#list");
+  list.innerHTML = "";
+  const dup = duplicateNotes();
+
+  if (!slots.length) {
+    const empty = document.createElement("p");
+    empty.className = "note";
+    empty.textContent = "Nenhum slot ainda. Escolha um mapeamento e clique em Aplicar, ou use + Novo slot para criar seu kit do zero.";
+    list.appendChild(empty);
+  }
+
+  for (const s of slots) {
+    if (only && !s.files.length) continue;
+    const el = document.createElement("div");
+    el.className = "slot" + (s.files.length ? "" : " empty");
+    el.dataset.id = s.id;
+    const modeOpts = MODES.map(([v, t]) => `<option value="${esc(v)}"${v === s.mode ? " selected" : ""}>${esc(t)}</option>`).join("");
+    const isDup = dup.includes(s.note) && s.files.length;
+    const velocityRanges = s.files.length > 1 ? velocityRangesForExport(s) : [];
+    el.innerHTML = `
+      <div class="head">
+        <input type="number" min="0" max="127" value="${s.note}" data-field="note" title="Nota MIDI${isDup ? " (duplicada!)" : ""}" ${isDup ? 'class="warn"' : ""}>
+        <span class="key">${noteLabel(s.note)}</span>
+        <input type="text" value="${esc(s.name)}" data-field="name">
+        <select data-field="mode" title="Como as camadas do slot são escolhidas">${modeOpts}</select>
+        <button data-act="add">+ samples</button>
+        <span class="count">${s.files.length ? s.files.length + (s.files.length > 1 ? " camadas" : " sample") : "vazio"}
+          <button class="mini" data-act="del" title="Excluir slot">✕</button></span>
+      </div>
+      ${s.files.length ? `<ul class="files">${s.files.map((f, i) => `
+        <li data-i="${i}" draggable="true" title="Arraste para reordenar ou mover para outro slot">
+          <span class="idx">${i + 1}</span>
+          <button class="mini" data-act="play" title="Ouvir">▶</button>
+          <span class="fn" title="${esc(f.name)}">${esc(f.name)}</span>
+          ${s.files.length > 1 ? `<span class="velocity" aria-label="Faixa de velocity da camada ${i + 1}">
+            ${!s.velocityRanges[i] || hasAutomaticVelocitySplit(s) ? '<span class="auto">auto</span>' : ""}
+            vel <input type="number" min="0" max="127" value="${velocityRanges[i]?.[0]?.low ?? 0}" data-field="velocityLow" data-i="${i}" aria-label="Velocity mínima">
+            – <input type="number" min="0" max="127" value="${velocityRanges[i]?.[0]?.high ?? 127}" data-field="velocityHigh" data-i="${i}" aria-label="Velocity máxima">
+          </span>` : ""}
+          <button class="mini" data-act="up" title="Subir">↑</button>
+          <button class="mini" data-act="down" title="Descer">↓</button>
+          <button class="mini" data-act="rm" title="Remover">✕</button>
+        </li>`).join("")}</ul>` : ""}`;
+    list.appendChild(el);
+  }
+  const filled = slots.filter(s => s.files.length).length;
+  $("#status").textContent = `${filled} de ${slots.length} slots com samples` + (dup.length ? ` · notas duplicadas: ${dup.join(", ")}` : "");
+}
+
+function duplicateNotes() {
+  const seen = new Set(), dup = new Set();
+  for (const s of slots) if (s.files.length) { if (seen.has(s.note)) dup.add(s.note); seen.add(s.note); }
+  return [...dup].sort((a, b) => a - b);
+}
+
+/* ---------- Eventos ---------- */
+const slotOf = el => slots.find(s => s.id === Number(el.closest(".slot").dataset.id));
+
+$("#list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const s = slotOf(b), act = b.dataset.act;
+  const li = b.closest("li"), i = li ? Number(li.dataset.i) : -1;
+  if (act === "add") { targetSlotId = s.id; $("#audioInput").click(); return; }
+  if (act === "del") { if (confirm(`Excluir o slot "${s.name}"?`)) slots = slots.filter(x => x !== s); }
+  if (act === "rm") {
+    s.files.splice(i, 1);
+    s.velocityRanges.splice(i, 1);
+    s.sfzVariants.splice(i, 1);
+  }
+  if (act === "up" && i > 0) {
+    [s.files[i - 1], s.files[i]] = [s.files[i], s.files[i - 1]];
+    [s.velocityRanges[i - 1], s.velocityRanges[i]] = [s.velocityRanges[i], s.velocityRanges[i - 1]];
+    [s.sfzVariants[i - 1], s.sfzVariants[i]] = [s.sfzVariants[i], s.sfzVariants[i - 1]];
+  }
+  if (act === "down" && i < s.files.length - 1) {
+    [s.files[i + 1], s.files[i]] = [s.files[i], s.files[i + 1]];
+    [s.velocityRanges[i + 1], s.velocityRanges[i]] = [s.velocityRanges[i], s.velocityRanges[i + 1]];
+    [s.sfzVariants[i + 1], s.sfzVariants[i]] = [s.sfzVariants[i], s.sfzVariants[i + 1]];
+  }
+  if (act === "play") { play(s.files[i]); return; }
+  render();
+});
+
+$("#list").addEventListener("change", e => {
+  const f = e.target.dataset.field;
+  if (!f) return;
+  const s = slotOf(e.target);
+  if (f === "velocityLow" || f === "velocityHigh") {
+    const index = Number(e.target.dataset.i);
+    const ranges = velocityRangesForExport(s);
+    const range = { ...ranges[index][0] };
+    const value = Number(e.target.value);
+    if (!Number.isInteger(value) || value < 0 || value > 127) {
+      alert("A velocity deve ser um número inteiro entre 0 e 127.");
+      render();
+      return;
+    }
+    if (f === "velocityLow") range.low = value;
+    else range.high = value;
+    if (range.low > range.high) {
+      alert("A velocity mínima não pode ser maior que a máxima.");
+      render();
+      return;
+    }
+    s.velocityRanges = ranges.map(items => items[0] ? { low: items[0].low, high: items[0].high } : null);
+    s.velocityRanges[index] = range;
+    render();
+    return;
+  }
+  if (f === "note") s.note = Math.min(127, Math.max(0, parseInt(e.target.value, 10) || 0));
+  if (f === "name") s.name = cleanName(e.target.value);
+  if (f === "mode") s.mode = e.target.value;
+  render();
+});
+
+for (const [note, name] of GM_DRUMS) $("#newSlotPart").add(new Option(`${note} · ${name}`, `${note}|${name}`));
+$("#newSlotPart").add(new Option("Peça personalizada…", "custom"));
+$("#newSlotPart").value = "custom";
+
+$("#newSlotPart").addEventListener("change", () => {
+  const value = $("#newSlotPart").value;
+  if (value === "custom") {
+    $("#newSlotName").value = "Peça personalizada";
+    return;
+  }
+  const [note, ...name] = value.split("|");
+  $("#newSlotNote").value = note;
+  $("#newSlotName").value = name.join("|");
+});
+
+$("#cancelNewSlot").addEventListener("click", () => $("#newSlotDialog").close("cancel"));
+$("#newSlotForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const note = Number($("#newSlotNote").value);
+  const name = cleanName($("#newSlotName").value);
+  if (!Number.isInteger(note) || note < 0 || note > 127 || !name) {
+    alert("Informe uma nota MIDI de 0 a 127 e um nome para a peça.");
+    return;
+  }
+  slots.push(newSlot(note, name));
+  $("#newSlotDialog").close("create");
+  render();
+});
+
+/* arrastar e soltar arquivos sobre um slot */
+const list = $("#list");
+list.addEventListener("dragstart", e => {
+  const li = e.target.closest(".files li");
+  if (!li) return;
+  const slot = slotOf(li);
+  draggedSample = { sourceSlotId: slot.id, sourceIndex: Number(li.dataset.i) };
+  li.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", "drumlabooh-sample");
+});
+list.addEventListener("dragend", e => {
+  e.target.closest(".files li")?.classList.remove("dragging");
+  list.querySelectorAll(".drag-target").forEach(el => el.classList.remove("drag-target"));
+  list.querySelectorAll(".slot.drop").forEach(el => el.classList.remove("drop"));
+  draggedSample = null;
+});
+list.addEventListener("dragover", e => {
+  const el = e.target.closest(".slot");
+  if (!el) return;
+  e.preventDefault();
+  el.classList.add("drop");
+  list.querySelectorAll(".drag-target").forEach(row => row.classList.remove("drag-target"));
+  const targetRow = e.target.closest(".files li");
+  if (draggedSample && targetRow) targetRow.classList.add("drag-target");
+});
+list.addEventListener("dragleave", e => {
+  const el = e.target.closest(".slot");
+  if (el && !el.contains(e.relatedTarget)) el.classList.remove("drop");
+  const row = e.target.closest(".files li");
+  if (row && !row.contains(e.relatedTarget)) row.classList.remove("drag-target");
+});
+list.addEventListener("drop", e => {
+  const el = e.target.closest(".slot");
+  if (!el) return;
+  e.preventDefault();
+  el.classList.remove("drop");
+  list.querySelectorAll(".drag-target").forEach(row => row.classList.remove("drag-target"));
+  if (!draggedSample) {
+    addFiles(slotOf(el), e.dataTransfer.files);
+    return;
+  }
+  const source = slots.find(slot => slot.id === draggedSample.sourceSlotId);
+  const destination = slotOf(el);
+  const sourceIndex = draggedSample.sourceIndex;
+  const targetRow = e.target.closest(".files li");
+  const targetIndex = targetRow && targetRow.closest(".slot") === el
+    ? Number(targetRow.dataset.i)
+    : destination.files.length;
+  if (!source || !source.files[sourceIndex]) { draggedSample = null; return; }
+  if (source !== destination && destination.files.length >= MAX_LAYERS_PER_SLOT) {
+    alert(`Cada peça aceita no máximo ${MAX_LAYERS_PER_SLOT} camadas.`);
+    draggedSample = null;
+    return;
+  }
+
+  const [file] = source.files.splice(sourceIndex, 1);
+  const [velocityRange] = source.velocityRanges.splice(sourceIndex, 1);
+  const [sfzVariants] = source.sfzVariants.splice(sourceIndex, 1);
+  const insertIndex = source === destination && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  destination.files.splice(insertIndex, 0, file);
+  destination.velocityRanges.splice(insertIndex, 0, velocityRange ?? null);
+  destination.sfzVariants.splice(insertIndex, 0, sfzVariants ?? null);
+  draggedSample = null;
+  render();
+});
+
+function addFiles(s, fileList) {
+  const audio = [...fileList].filter(f => f.type.startsWith("audio/") || /\.(wav|flac|ogg|mp3|aiff?)$/i.test(f.name));
+  audio.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const available = Math.max(0, MAX_LAYERS_PER_SLOT - s.files.length);
+  for (const f of audio.slice(0, available)) {
+    s.files.push(f);
+    s.velocityRanges.push(null);
+    s.sfzVariants.push(null);
+  }
+  if (audio.length > available) {
+    alert(`Cada peça aceita no máximo ${MAX_LAYERS_PER_SLOT} camadas. ${audio.length - available} arquivo(s) não foram adicionados.`);
+  }
+  render();
+}
+
+$("#audioInput").addEventListener("change", e => {
+  const s = slots.find(x => x.id === targetSlotId);
+  if (s) addFiles(s, e.target.files);
+  e.target.value = "";
+});
+
+/* ---------- Importar SFZ e kits Hydrogen ---------- */
+$("#importKit").addEventListener("click", () => $("#importDialog").showModal());
+$("#chooseImportSource").addEventListener("click", e => {
+  e.preventDefault();
+  $("#importDialog").close();
+  $("#kitInput").click();
+});
+$("#cancelUnmapped").addEventListener("click", () => $("#unmappedDialog").close("cancel"));
+$("#cancelSfz").addEventListener("click", () => $("#sfzDialog").close("cancel"));
+
+function chooseSfzEntry(entries) {
+  const dialog = $("#sfzDialog");
+  const form = $("#sfzForm");
+  const select = $("#sfzChoice");
+  select.replaceChildren(...entries.map((entry, index) =>
+    new Option(entry.path, String(index))
+  ));
+  dialog.showModal();
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      dialog.close("choose");
+    };
+    const onClose = () => {
+      form.removeEventListener("submit", onSubmit);
+      resolve(dialog.returnValue === "choose" ? entries[Number(select.value)] : null);
+    };
+    form.addEventListener("submit", onSubmit, { once: true });
+    dialog.addEventListener("close", onClose, { once: true });
+  });
+}
+
+function chooseUnmappedSlots(groups) {
+  const dialog = $("#unmappedDialog");
+  const list = $("#unmappedList");
+  list.replaceChildren();
+  groups.forEach((group, index) => {
+    const row = document.createElement("label");
+    row.className = "unmapped-row";
+    const title = document.createElement("strong");
+    title.textContent = `${group.label} · ${group.zones.length} sample(s)`;
+    const files = document.createElement("small");
+    files.textContent = [...new Set(group.zones.map(zone => zone.file.name))].join(", ");
+    const select = document.createElement("select");
+    select.dataset.group = String(index);
+    select.add(new Option("Não importar esta peça", ""));
+    for (const slot of slots) select.add(new Option(`${noteLabel(slot.note)} · ${slot.name} (MIDI ${slot.note})`, String(slot.id)));
+    row.append(title, files, select);
+    list.append(row);
+  });
+  dialog.showModal();
+  return new Promise(resolve => {
+    let result = null;
+    const form = $("#unmappedForm");
+    const onSubmit = event => {
+      event.preventDefault();
+      result = new Map([...list.querySelectorAll("select")].map(select => [Number(select.dataset.group), select.value]));
+      dialog.close("apply");
+    };
+    const onClose = () => {
+      form.removeEventListener("submit", onSubmit);
+      resolve(dialog.returnValue === "apply" ? result : null);
+    };
+    form.addEventListener("submit", onSubmit, { once: true });
+    dialog.addEventListener("close", onClose, { once: true });
+  });
+}
+
+async function handleKitSelection(input, description) {
+  const selected = [...input.files];
+  input.value = "";
+  if (!selected.length) return;
+  const button = $("#importKit");
+  button.disabled = true;
+  button.textContent = "Importando...";
+  try {
+    await importKit(selected);
+  } catch (err) {
+    alert(`Não foi possível importar ${description}: ` + err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Importar kit SFZ / Hydrogen...";
+  }
+}
+
+$("#kitInput").addEventListener("change", async e => {
+  await handleKitSelection(e.target, "a pasta do kit");
+});
+
+const normalizePath = path => {
+  const parts = [];
+  for (const part of path.replace(/\\/g, "/").replace(/^\//, "").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/").toLowerCase();
+};
+
+async function inflateBytes(data, format) {
+  if (typeof DecompressionStream === "undefined") throw new Error("Este navegador não oferece suporte à descompactação necessária.");
+  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream(format));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function decodeTar(bytes) {
+  const files = [];
+  const text = (start, length) => new TextDecoder().decode(bytes.subarray(start, start + length)).replace(/\0.*$/s, "");
+  let offset = 0, longName = "", paxPath = "";
+  while (offset + 512 <= bytes.length) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every(byte => byte === 0)) break;
+    const name = text(offset, 100), prefix = text(offset + 345, 155);
+    const rawSize = text(offset + 124, 12).trim().replace(/\0.*$/s, "");
+    const size = Number.parseInt(rawSize.replace(/^[0-7]*/, value => value || "0"), 8);
+    if (!Number.isSafeInteger(size) || size < 0 || offset + 512 + size > bytes.length) throw new Error("O arquivo TAR do kit Hydrogen está inválido.");
+    const type = String.fromCharCode(header[156] || 48);
+    const data = bytes.subarray(offset + 512, offset + 512 + size);
+    if (type === "L") longName = new TextDecoder().decode(data).replace(/\0.*$/s, "");
+    else if (type === "x" || type === "g") {
+      let cursor = 0;
+      while (cursor < data.length) {
+        const space = data.indexOf(32, cursor);
+        if (space < 0) break;
+        const recordLength = Number.parseInt(new TextDecoder().decode(data.subarray(cursor, space)), 10);
+        if (!Number.isInteger(recordLength) || recordLength < 1 || cursor + recordLength > data.length) break;
+        const record = new TextDecoder().decode(data.subarray(space + 1, cursor + recordLength - 1));
+        if (record.startsWith("path=")) paxPath = record.slice(5);
+        cursor += recordLength;
+      }
+    } else if (type === "0" || type === "\0" || type === "7") {
+      const path = paxPath || longName || [prefix, name].filter(Boolean).join("/");
+      if (path && !path.endsWith("/")) files.push({
+        path,
+        name: path.split("/").pop(),
+        file: new File([data], path.split("/").pop())
+      });
+      longName = "";
+      paxPath = "";
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return files;
+}
+
+async function unzipFiles(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) return decodeTar(await inflateBytes(bytes, "gzip"));
+  if (String.fromCharCode(...bytes.subarray(0, 4)) !== "PK\u0003\u0004" &&
+      String.fromCharCode(...bytes.subarray(0, 4)) !== "PK\u0005\u0006") {
+    throw new Error(`"${file.name}" não é um ZIP nem um kit Hydrogen compactado com gzip.`);
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  if (end < 0) throw new Error(`"${file.name}" não parece ser um ZIP válido.`);
+  const count = view.getUint16(end + 10, true);
+  let offset = view.getUint32(end + 16, true);
+  const files = [];
+  for (let i = 0; i < count; i++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("Índice ZIP inválido.");
+    const method = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+    offset += 46 + nameLength + extraLength + commentLength;
+    if (name.endsWith("/")) continue;
+    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error(`Entrada ZIP inválida: ${name}`);
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = bytes.subarray(start, start + compressedSize);
+    let data;
+    if (method === 0) data = compressed;
+    else if (method === 8) data = await inflateBytes(compressed, "deflate-raw");
+    else {
+      throw new Error(`O método de compressão do ZIP não é suportado (${method}).`);
+    }
+    files.push({ path: name, name: name.split("/").pop(), file: new File([data], name.split("/").pop()) });
+  }
+  return files;
+}
+
+function fileCatalog(files) {
+  const exact = new Map(), byName = new Map();
+  for (const entry of files) {
+    const path = normalizePath(entry.path);
+    if (!exact.has(path)) exact.set(path, entry.file);
+    const name = normalizePath(entry.name);
+    if (!byName.has(name)) byName.set(name, entry.file);
+    else byName.set(name, null);
+  }
+  return { exact, byName };
+}
+
+function findCatalogFile(catalog, relativePath, basePath = "") {
+  let path = relativePath.replace(/\\/g, "/");
+  try { path = decodeURIComponent(path); } catch {}
+  const fullPath = normalizePath(basePath ? `${basePath}/${path}` : path);
+  return catalog.exact.get(fullPath) || catalog.exact.get(normalizePath(path)) || catalog.byName.get(normalizePath(path.split("/").pop())) || null;
+}
+
+async function expandSfzIncludes(text, sfzEntry, entries, macros = new Map(), active = new Set()) {
+  const currentPath = normalizePath(sfzEntry.path);
+  if (active.has(currentPath)) throw new Error(`Ciclo de #include detectado em "${sfzEntry.path}".`);
+  active.add(currentPath);
+  const output = [];
+  const expandMacros = value => {
+    let expanded = value;
+    for (let pass = 0; pass < 32; pass++) {
+      const next = expanded.replace(/\$[A-Za-z_]\w*/g, name => macros.get(name) ?? name);
+      if (next === expanded) return expanded;
+      expanded = next;
+    }
+    throw new Error(`Expansão excessiva de macros no arquivo "${sfzEntry.name}".`);
+  };
+
+  try {
+    for (const line of text.split(/\r?\n/)) {
+      const define = line.match(/^\s*#define\s+(\$[A-Za-z_]\w*)\s+(.+?)\s*$/i);
+      if (define) {
+        macros.set(define[1], define[2].replace(/\s+\/\/.*$/, "").trim());
+        continue;
+      }
+      const include = line.match(/^\s*#include\s+["']([^"']+)["']/i);
+      if (include) {
+        const base = sfzEntry.path.includes("/") ? sfzEntry.path.slice(0, sfzEntry.path.lastIndexOf("/")) : "";
+        const includePath = normalizePath(base ? `${base}/${include[1]}` : include[1]);
+        const exactMatch = entries.find(entry => normalizePath(entry.path) === includePath);
+        const suffix = `/${normalizePath(include[1])}`;
+        const suffixMatches = exactMatch ? [] : entries.filter(entry =>
+          normalizePath(entry.path).endsWith(suffix)
+        );
+        if (suffixMatches.length > 1) {
+          throw new Error(`Há mais de um arquivo que corresponde ao include "${include[1]}": ${suffixMatches.map(entry => entry.path).join(", ")}.`);
+        }
+        const includedEntry = exactMatch || suffixMatches[0];
+        if (!includedEntry) throw new Error(`Arquivo incluído no SFZ não encontrado: "${include[1]}" (referenciado por "${sfzEntry.path}").`);
+        output.push(await expandSfzIncludes(await includedEntry.file.text(), includedEntry, entries, macros, active));
+        continue;
+      }
+      output.push(expandMacros(line));
+    }
+  } finally {
+    active.delete(currentPath);
+  }
+  return output.join("\n");
+}
+
+function parseOpcodes(text) {
+  const result = {};
+  const source = text.replace(/(^|\s)\/\/.*$/gm, "$1");
+  const pattern = /(?:^|\s)([A-Za-z_][\w]*)\s*=/gm;
+  const matches = [...source.matchAll(pattern)];
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    const start = match.index + match[0].length;
+    const end = matches[i + 1]?.index ?? source.length;
+    let value = source.slice(start, end).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (value) result[match[1].toLowerCase()] = value;
+  }
+  return result;
+}
+
+function sfzRegions(text) {
+  const tags = [...text.matchAll(/<([a-z]+)\s*>/gi)];
+  let global = {}, group = {}, region = null, current = null;
+  const regions = [];
+  const apply = (target, source) => Object.assign(target, parseOpcodes(source));
+  const before = tags.length ? text.slice(0, tags[0].index) : text;
+  apply(global, before);
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i][1].toLowerCase();
+    const start = tags[i].index + tags[i][0].length;
+    const end = i + 1 < tags.length ? tags[i + 1].index : text.length;
+    if (tag === "global") { apply(global, text.slice(start, end)); continue; }
+    if (tag === "group") { group = {}; apply(group, text.slice(start, end)); region = null; continue; }
+    if (tag === "region") {
+      region = { ...global, ...group };
+      apply(region, text.slice(start, end));
+      regions.push(region);
+      continue;
+    }
+    if (region) apply(region, text.slice(start, end));
+    else if (tag === "control" || tag === "master") apply(global, text.slice(start, end));
+  }
+  return regions;
+}
+
+function xmlDocument(text, filename) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error(`O arquivo "${filename}" contém XML inválido.`);
+  return doc;
+}
+
+const xmlElements = (root, name) => [...root.getElementsByTagNameNS("*", name)];
+
+function importSfz(text, sfzEntry, catalog) {
+  const base = sfzEntry.path.includes("/") ? sfzEntry.path.slice(0, sfzEntry.path.lastIndexOf("/")) : "";
+  const zones = [];
+  for (const region of sfzRegions(text)) {
+    if (!region.sample) continue;
+    const sampleBase = [base, region.default_path].filter(Boolean).join("/");
+    const file = findCatalogFile(catalog, region.sample, sampleBase);
+    if (!file) throw new Error(`Sample SFZ não encontrado: "${region.sample}". Selecione o SFZ junto com seus samples.`);
+    const low = Math.max(0, Number.parseInt(region.lokey ?? region.key ?? "0", 10));
+    const high = Math.min(127, Number.parseInt(region.hikey ?? region.key ?? "127", 10));
+    const hasVelocityRange = region.lovel !== undefined || region.hivel !== undefined;
+    const lowVelocity = Math.max(0, Number.parseInt(region.lovel ?? "0", 10));
+    const highVelocity = Math.min(127, Number.parseInt(region.hivel ?? "127", 10));
+    if (![low, high, lowVelocity, highVelocity].every(Number.isFinite) || low > high || lowVelocity > highVelocity) continue;
+    const label = [region.label, region.region_label, region.group_label, file.name.replace(/\.[^.]+$/, "")].filter(Boolean).join(" ");
+    for (let note = low; note <= high; note++) zones.push({
+      note,
+      lowVelocity: hasVelocityRange ? lowVelocity : null,
+      highVelocity: hasVelocityRange ? highVelocity : null,
+      lowRandom: region.lorand === undefined ? null : Number.parseFloat(region.lorand),
+      highRandom: region.hirand === undefined ? null : Number.parseFloat(region.hirand),
+      sfzPath: sfzEntry.path,
+      sourceFormat: "sfz",
+      label,
+      file
+    });
+  }
+  if (!zones.length) throw new Error(`Nenhuma região com sample foi encontrada em "${sfzEntry.name}".`);
+  return zones;
+}
+
+function collapseSfzRandomVariants(zones) {
+  const groups = new Map();
+  for (const zone of zones) {
+    if (zone.lowRandom === null && zone.highRandom === null) continue;
+    const key = [
+      zone.sfzPath, zone.note, zone.lowVelocity, zone.highVelocity
+    ].join("|");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(zone);
+  }
+
+  const replacements = new Map();
+  for (const [key, variants] of groups) {
+    if (variants.length < 2 || variants.some(zone =>
+      zone.lowRandom === null || zone.highRandom === null ||
+      !Number.isFinite(zone.lowRandom) || !Number.isFinite(zone.highRandom)
+    )) continue;
+    const sorted = [...variants].sort((a, b) => a.lowRandom - b.lowRandom);
+    let boundary = 0;
+    const contiguous = sorted.every(zone => {
+      const matches = Math.abs(zone.lowRandom - boundary) < 0.00001;
+      boundary = zone.highRandom;
+      return matches && zone.highRandom > zone.lowRandom && zone.highRandom <= 1;
+    });
+    if (!contiguous || Math.abs(boundary - 1) >= 0.00001) continue;
+
+    const representative = { ...sorted[0] };
+    representative.sfzVariants = sorted.map(zone => ({
+      file: zone.file,
+      lowRandom: zone.lowRandom,
+      highRandom: zone.highRandom
+    }));
+    replacements.set(key, representative);
+  }
+
+  const emitted = new Set();
+  const result = [];
+  for (const zone of zones) {
+    const key = [
+      zone.sfzPath, zone.note, zone.lowVelocity, zone.highVelocity
+    ].join("|");
+    const representative = replacements.get(key);
+    if (!representative) {
+      result.push(zone);
+      continue;
+    }
+    if (!emitted.has(key)) {
+      result.push(representative);
+      emitted.add(key);
+    }
+  }
+  return result;
+}
+
+function limitLayersPerSlot(zones, limit) {
+  const unique = [];
+  const sfzRanges = new Set();
+  let discarded = 0;
+  for (const zone of zones) {
+    if (zone.sourceFormat === "sfz") {
+      const key = `${zone.lowVelocity ?? 0}|${zone.highVelocity ?? 127}`;
+      if (sfzRanges.has(key)) {
+        discarded++;
+        continue;
+      }
+      sfzRanges.add(key);
+    }
+    unique.push(zone);
+  }
+  if (limit <= 0) return { zones: [], discarded: unique.length + discarded };
+  if (unique.length <= limit) return { zones: unique, discarded };
+  discarded += unique.length - limit;
+  const sorted = [...unique].sort((a, b) =>
+    (a.lowVelocity ?? 0) - (b.lowVelocity ?? 0) ||
+    (a.highVelocity ?? 127) - (b.highVelocity ?? 127) ||
+    a.file.name.localeCompare(b.file.name, undefined, { numeric: true })
+  );
+  const reduced = [];
+  for (let i = 0; i < limit; i++) {
+    const start = Math.floor(i * sorted.length / limit);
+    const end = Math.floor((i + 1) * sorted.length / limit);
+    const group = sorted.slice(start, end);
+    const middle = (group[0].lowVelocity ?? 0) / 2 + (group[group.length - 1].highVelocity ?? 127) / 2;
+    const representative = group.reduce((best, zone) => {
+      const center = (zone.lowVelocity ?? 0) / 2 + (zone.highVelocity ?? 127) / 2;
+      return Math.abs(center - middle) < Math.abs(
+        ((best.lowVelocity ?? 0) / 2 + (best.highVelocity ?? 127) / 2) - middle
+      ) ? zone : best;
+    });
+    if (group.every(zone => zone.lowVelocity !== null && zone.highVelocity !== null)) {
+      reduced.push({
+        ...representative,
+        lowVelocity: Math.min(...group.map(zone => zone.lowVelocity)),
+        highVelocity: Math.max(...group.map(zone => zone.highVelocity)),
+        sfzVariants: null
+      });
+    } else {
+      reduced.push(representative);
+    }
+  }
+  if (reduced.length > limit) {
+    discarded += reduced.length - limit;
+    return { zones: reduced.slice(0, limit), discarded };
+  }
+  return { zones: reduced, discarded };
+}
+
+function importHydrogen(xmlText, xmlEntry, catalog) {
+  const doc = xmlDocument(xmlText, xmlEntry.name);
+  const base = xmlEntry.path.includes("/") ? xmlEntry.path.slice(0, xmlEntry.path.lastIndexOf("/")) : "";
+  const zones = [];
+  for (const instrument of xmlElements(doc, "instrument")) {
+    const rawNote = instrument.getAttribute("drumkitnote") ?? instrument.getAttribute("midiNote") ??
+      instrument.getAttribute("note") ?? ["midiOutNote", "midiNote", "drumkitnote", "midi_note"]
+        .flatMap(name => xmlElements(instrument, name))[0]?.textContent;
+    const note = Number.parseInt(rawNote, 10);
+    if (!Number.isInteger(note) || note < 0 || note > 127) continue;
+    const label = [
+      instrument.getAttribute("name"),
+      xmlElements(instrument, "name")[0]?.textContent,
+      xmlElements(instrument, "type")[0]?.textContent
+    ].filter(Boolean).join(" ") || `Nota ${note}`;
+    for (const filename of xmlElements(instrument, "filename")) {
+      const path = filename.textContent.trim();
+      if (!path) continue;
+      const file = findCatalogFile(catalog, path, base);
+      if (!file) throw new Error(`Sample Hydrogen não encontrado: "${path}".`);
+      let layer = filename.parentElement;
+      while (layer && layer !== instrument && layer.localName.toLowerCase() !== "layer") layer = layer.parentElement;
+      const minElement = xmlElements(layer || instrument, "min")[0];
+      const maxElement = xmlElements(layer || instrument, "max")[0];
+      const velocityMin = Number.parseFloat(minElement?.textContent ?? "0");
+      const velocityMax = Number.parseFloat(maxElement?.textContent ?? "1");
+      const lowVelocity = Number.isFinite(velocityMin) ? Math.ceil(Math.min(1, Math.max(0, velocityMin)) * 127) : 0;
+      const highVelocity = Number.isFinite(velocityMax)
+        ? (velocityMax >= 1 ? 127 : Math.ceil(Math.min(1, Math.max(0, velocityMax)) * 127) - 1)
+        : 127;
+      if (lowVelocity > highVelocity) continue;
+      const hasVelocityRange = !!minElement || !!maxElement;
+      zones.push({
+        note,
+        lowVelocity: hasVelocityRange ? lowVelocity : null,
+        highVelocity: hasVelocityRange ? highVelocity : null,
+        file,
+        label
+      });
+    }
+  }
+  if (!zones.length) throw new Error("Não foram encontrados instrumentos com nota MIDI e samples no drumkit.xml.");
+  return zones;
+}
+
+function instrumentFamily(value) {
+  const name = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+  const families = [
+    ["side stick", "sidestick"], ["sidestick", "sidestick"], ["cross stick", "sidestick"],
+    ["rimshot", "snare"], ["snare", "snare"], ["caixa", "snare"],
+    ["bass drum", "kick"], ["bassdrum", "kick"], ["kick", "kick"], ["bumbo", "kick"], ["bdrum", "kick"],
+    ["clap", "clap"], ["palma", "clap"],
+    ["hi hat", "hihat"], ["hihat", "hihat"], ["high hat", "hihat"], ["chimbal", "hihat"], ["hat", "hihat"], ["hh", "hihat"],
+    ["tom", "tom"], ["cowbell", "cowbell"], ["ride bell", "ride"], ["ridebell", "ride"], ["rideb", "ride"], ["ride", "ride"],
+    ["crash", "crash"], ["choke", "choke"], ["chinese cymbal", "china"], ["china", "china"],
+    ["splash", "splash"], ["tambourine", "tambourine"], ["pandeiro", "tambourine"], ["bongo", "bongo"], ["conga", "conga"],
+    ["timbale", "timbale"], ["agogo", "agogo"], ["cabasa", "cabasa"], ["maraca", "maracas"],
+    ["shaker", "shaker"], ["guiro", "guiro"], ["clave", "claves"], ["wood block", "woodblock"],
+    ["woodblock", "woodblock"], ["triangle", "triangle"], ["vibraslap", "vibraslap"], ["cuica", "cuica"]
+  ];
+  for (const [term, family] of families) {
+    if (` ${name} `.includes(` ${term} `)) return family;
+  }
+  return "";
+}
+
+function bestMappedSlot(zone) {
+  const normalizeWords = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+  const hasTerm = (text, term) => (` ${text} `).includes(` ${normalizeWords(term)} `);
+  const sourceLabel = normalizeWords(zone.label);
+  const sourceFile = normalizeWords(zone.file.name);
+  const sourceFamily = instrumentFamily(zone.label) || instrumentFamily(zone.file.name);
+  if (!sourceFamily) return slots.find(slot => slot.note === zone.note) || null;
+
+  const qualifiers = text => {
+    const low = hasTerm(text, "low") || hasTerm(text, "lo");
+    const mid = hasTerm(text, "mid") || hasTerm(text, "middle");
+    const high = hasTerm(text, "high") || hasTerm(text, "hi");
+    if (sourceFamily === "hihat") {
+      const compact = text.replace(/\s/g, "");
+      if (compact.includes("semiopen") || compact.includes("halfopen") || hasTerm(text, "loose")) return "semi";
+      if (compact.includes("opencls") || hasTerm(text, "open") || hasTerm(text, "opn")) return "open";
+      if (hasTerm(text, "pedal") || hasTerm(text, "pdl") || hasTerm(text, "ped") ||
+          hasTerm(text, "foot") || hasTerm(text, "stomp") || hasTerm(text, "stp")) return "pedal";
+      if (hasTerm(text, "closed") || hasTerm(text, "close") || hasTerm(text, "cls") || hasTerm(text, "clsd")) return "closed";
+      if (hasTerm(text, "semi") || (mid && (low || high))) return "semi";
+    }
+    if (sourceFamily === "tom") {
+      const floor = hasTerm(text, "floor") || hasTerm(text, "bass");
+      const position = low && mid ? "low-mid" : high && mid ? "high-mid" : low ? "low" : mid ? "mid" : high ? "high" : "";
+      return position ? `${floor ? "floor-" : ""}${position}` : "";
+    }
+    if (sourceFamily === "ride") {
+      if (hasTerm(text, "bell") || hasTerm(text, "rideb") || hasTerm(text, "ridebell")) return "bell";
+      if (hasTerm(text, "tip") || hasTerm(text, "normal") || hasTerm(text, "body") ||
+          hasTerm(text, "ride")) return "ride";
+    }
+    return "";
+  };
+  const labelFamily = instrumentFamily(zone.label);
+  const fileFamily = instrumentFamily(zone.file.name);
+  const labelQualifier = qualifiers(sourceLabel);
+  const fileQualifier = qualifiers(sourceFile);
+  const sourceQualifier = labelQualifier || fileQualifier;
+  if (labelFamily && fileFamily === labelFamily && labelQualifier && fileQualifier &&
+      labelQualifier !== fileQualifier) return null;
+
+  const exactNoteSlot = slots.find(slot => slot.note === zone.note);
+  const exactNoteFamily = exactNoteSlot && instrumentFamily(exactNoteSlot.name);
+  if (exactNoteSlot && (!exactNoteFamily || exactNoteFamily === sourceFamily)) {
+    const noteQualifier = exactNoteFamily === sourceFamily ? qualifiers(normalizeWords(exactNoteSlot.name)) : "";
+    if (!sourceQualifier || !noteQualifier || noteQualifier === sourceQualifier) return exactNoteSlot;
+    if (noteQualifier && sourceQualifier && noteQualifier !== sourceQualifier) return null;
+  }
+
+  const noteSlot = exactNoteSlot;
+  const noteFamily = noteSlot && instrumentFamily(noteSlot.name);
+  const noteQualifier = noteFamily === sourceFamily ? qualifiers(normalizeWords(noteSlot.name)) : "";
+
+  if (noteFamily === sourceFamily && noteQualifier && sourceQualifier && noteQualifier !== sourceQualifier) {
+    return null;
+  }
+  if (noteFamily === sourceFamily && (!sourceQualifier || !noteQualifier || noteQualifier === sourceQualifier)) {
+    return noteSlot;
+  }
+
+  const variants = [
+    [["side stick", "sidestick", "cross stick"], ["side stick", "sidestick"]],
+    [["rim", "rimshot", "edge"], ["rim", "edge"]],
+    [["closed", "close", "cls", "clsd"], ["closed"]],
+    [["semi open", "semi-open", "half open", "loose"], ["semi", "half"]],
+    [["open", "opn", "opencls"], ["open"]],
+    [["pedal", "pdl", "ped", "foot", "stp"], ["pedal", "foot"]],
+    [["bell"], ["bell"]],
+    [["center", "centre"], ["center", "centre"]],
+    [["low", "lo"], ["low", "lo"]],
+    [["mid", "middle"], ["mid", "middle"]],
+    [["high", "hi"], ["high", "hi"]]
+  ];
+  const hasVariant = text => variants.some(([terms]) => terms.some(term => hasTerm(text, term)));
+  const sourceName = qualifiers(sourceFile) || hasVariant(sourceFile) ? sourceFile : sourceLabel || sourceFile;
+
+  let best = null, bestScore = -Infinity;
+  for (const slot of slots) {
+    const targetFamily = instrumentFamily(slot.name);
+    if (sourceFamily !== targetFamily) continue;
+    const target = normalizeWords(slot.name);
+    let score = 100 + Math.max(0, 20 - Math.abs(slot.note - zone.note));
+    if ((sourceFamily === "tom" || sourceFamily === "ride" || sourceFamily === "hihat") && sourceQualifier) {
+      const targetQualifier = qualifiers(target);
+      if (targetQualifier === sourceQualifier) score += 1000;
+      else if (targetQualifier) score -= 300;
+      if (sourceFamily === "tom" && sourceQualifier.startsWith("floor-") && targetQualifier === sourceQualifier.slice(6)) score += 800;
+    }
+    if (sourceQualifier && ["tom", "ride", "hihat"].includes(sourceFamily) &&
+        qualifiers(target) !== sourceQualifier) continue;
+    if (sourceFamily === "ride" && !sourceQualifier && hasTerm(target, "bell")) score -= 300;
+    let sourceHasVariant = false;
+    for (const [terms, targetTerms] of variants) {
+      const sourceMatch = terms.some(term => hasTerm(sourceName, term));
+      const targetMatch = targetTerms.some(term => hasTerm(target, term));
+      if (sourceMatch) {
+        sourceHasVariant = true;
+        score += targetMatch ? 50 : -50;
+      }
+    }
+    if (sourceFamily === "snare" && !sourceHasVariant) {
+      if (hasTerm(target, "center") || target === "snare") score += 25;
+      if (hasTerm(target, "side stick") || hasTerm(target, "sidestick") || hasTerm(target, "rim") || hasTerm(target, "edge")) score -= 25;
+    }
+    if (sourceFamily === "hihat" && !sourceHasVariant) {
+      if (hasTerm(target, "closed")) score += 10;
+      if (hasTerm(target, "open") || hasTerm(target, "pedal") || hasTerm(target, "semi")) score -= 10;
+    }
+    if (score > bestScore) { best = slot; bestScore = score; }
+  }
+  return best;
+}
+
+function hasAutomaticVelocitySplit(slot) {
+  return slot.files.length > 1 && slot.velocityRanges.every(range =>
+    !range || (range.low === 0 && range.high === 127)
+  );
+}
+
+function velocityRangesForExport(slot) {
+  const ranges = slot.files.map((_, i) => {
+    const range = slot.velocityRanges[i];
+    return range ? [{ low: range.low, high: range.high }] : [];
+  });
+  if (hasAutomaticVelocitySplit(slot)) {
+    return ranges.map((_, i) => [{
+      low: Math.floor(i * 128 / ranges.length),
+      high: Math.floor((i + 1) * 128 / ranges.length) - 1
+    }]);
+  }
+  const missing = ranges.map((items, index) => items.length ? -1 : index).filter(index => index >= 0);
+  const hasSourceRanges = missing.length !== ranges.length;
+  if (!hasSourceRanges) {
+    for (let i = 0; i < ranges.length; i++) {
+      ranges[i].push({
+        low: Math.floor(i * 128 / ranges.length),
+        high: Math.floor((i + 1) * 128 / ranges.length) - 1
+      });
+    }
+    return ranges;
+  }
+
+  const occupied = new Uint8Array(128);
+  for (const items of ranges) for (const range of items) {
+    for (let velocity = Math.max(0, range.low); velocity <= Math.min(127, range.high); velocity++) occupied[velocity] = 1;
+  }
+  const free = [];
+  for (let velocity = 0; velocity < 128; velocity++) if (!occupied[velocity]) free.push(velocity);
+  missing.forEach((index, i) => {
+    const start = Math.floor(i * free.length / missing.length);
+    const end = Math.floor((i + 1) * free.length / missing.length);
+    for (let j = start; j < end;) {
+      const low = free[j];
+      let high = low;
+      j++;
+      while (j < end && free[j] === high + 1) high = free[j++];
+      ranges[index].push({ low, high });
+    }
+  });
+  return ranges;
+}
+
+async function importKit(selectedFiles) {
+  let entries = selectedFiles.map(file => ({
+    path: file.webkitRelativePath || file.name,
+    name: file.name,
+    file
+  }));
+  const archives = entries.filter(entry => /\.(zip|h2drumkit)$/i.test(entry.name));
+  for (const archive of archives) entries.push(...await unzipFiles(archive.file));
+  const catalog = fileCatalog(entries);
+  const pending = [];
+  const sfz = entries.filter(entry => /\.sfz$/i.test(entry.name));
+  const selectedSfz = sfz.length > 1 ? await chooseSfzEntry(sfz) : sfz[0] || null;
+  if (sfz.length > 1 && !selectedSfz) throw new Error("Seleção de arquivo SFZ cancelada.");
+  const hydrogen = entries.filter(entry => /(^|\/)drumkit\.xml$/i.test(entry.path));
+  const ignored = [];
+  if (selectedSfz) {
+    const expandedSfz = await expandSfzIncludes(await selectedSfz.file.text(), selectedSfz, entries);
+    pending.push(...importSfz(expandedSfz, selectedSfz, catalog));
+  }
+  for (const entry of hydrogen) pending.push(...importHydrogen(await entry.file.text(), entry, catalog));
+  const importZones = collapseSfzRandomVariants(pending);
+  if (!importZones.length) throw new Error("Não foi encontrado nenhum SFZ ou kit Hydrogen nesta pasta.");
+
+  const byNote = new Map();
+  const unmatched = new Map();
+  for (const zone of importZones) {
+    const slot = bestMappedSlot(zone);
+    if (slot) {
+      if (!byNote.has(slot.id)) byNote.set(slot.id, { slot, zones: [] });
+      byNote.get(slot.id).zones.push(zone);
+      continue;
+    }
+    const label = (zone.label || zone.file.name.replace(/\.[^.]+$/, "")).trim();
+    const key = `${zone.note}|${label.toLowerCase()}`;
+    if (!unmatched.has(key)) unmatched.set(key, { label, zones: [] });
+    unmatched.get(key).zones.push(zone);
+  }
+  if (unmatched.size) {
+    const groups = [...unmatched.values()];
+    const choices = await chooseUnmappedSlots(groups);
+    if (!choices) throw new Error("Importação cancelada.");
+    groups.forEach((group, index) => {
+      const slotId = choices.get(index);
+      if (!slotId) { ignored.push(...group.zones.map(zone => zone.note)); return; }
+      const slot = slots.find(item => item.id === Number(slotId));
+      if (!slot) throw new Error("Um dos slots escolhidos não está mais disponível.");
+      if (!byNote.has(slot.id)) byNote.set(slot.id, { slot, zones: [] });
+      byNote.get(slot.id).zones.push(...group.zones);
+    });
+  }
+  let added = 0;
+  let discardedLayers = 0;
+  let preservedVariants = 0;
+  for (const { slot, zones } of byNote.values()) {
+    const remaining = Math.max(0, MAX_LAYERS_PER_SLOT - slot.files.length);
+    const limited = limitLayersPerSlot(zones, remaining);
+    discardedLayers += limited.discarded;
+    const layers = limited.zones
+      .sort((a, b) =>
+        (a.lowVelocity ?? 0) - (b.lowVelocity ?? 0) ||
+        a.file.name.localeCompare(b.file.name, undefined, { numeric: true })
+      )
+      .slice(0, remaining);
+    for (const zone of layers) {
+      slot.files.push(zone.file);
+      slot.velocityRanges.push(zone.lowVelocity === null || zone.highVelocity === null
+        ? null
+        : { low: zone.lowVelocity, high: zone.highVelocity });
+      slot.sfzVariants.push(zone.sfzVariants || null);
+      preservedVariants += Math.max(0, (zone.sfzVariants?.length || 1) - 1);
+    }
+    added += layers.length;
+    if (layers.length > 1) slot.mode = "";
+  }
+  render();
+  const missing = [...new Set(ignored)].sort((a, b) => a - b);
+  const details = [];
+  if (missing.length) details.push(`Notas sem slot neste mapeamento: ${missing.join(", ")}.`);
+  if (discardedLayers) details.push(
+    `${discardedLayers} camada(s) removida(s)/combinada(s): ficou só uma por faixa de velocity e no máximo ${MAX_LAYERS_PER_SLOT} por peça.`
+  );
+  if (preservedVariants) details.push(
+    `${preservedVariants} variação(ões) aleatória(s) preservada(s) em drumkit-variants.sfz; use drumkit.sfz para manter as faixas originais de velocity com uma amostra representativa por faixa.`
+  );
+  if (!added) throw new Error(`Nenhum sample corresponde às notas do mapeamento selecionado.${details.length ? ` ${details.join(" ")}` : ""}`);
+  alert(`${added} sample(s) importado(s) em ${byNote.size} slot(s).${details.length ? `\n${details.join("\n")}` : ""}`);
+}
+
+/* pré-escuta */
+let audio = null, audioURL = null;
+function play(file) {
+  if (audio) audio.pause();
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = URL.createObjectURL(file);
+  audio = new Audio(audioURL);
+  audio.play().catch(() => alert("O navegador não conseguiu tocar este arquivo."));
+}
+
+/* presets e novos slots */
+for (const name of Object.keys(PRESETS)) $("#preset").add(new Option(name, name));
+
+$("#preset").addEventListener("change", () => {
+  $("#applyPreset").disabled = !$("#preset").value;
+});
+
+$("#applyPreset").addEventListener("click", () => {
+  const preset = PRESETS[$("#preset").value];
+  if (!preset) return;
+  const selected = preset;
+  if (!selected.length && (slots.length || slots.some(slot => slot.files.length)) &&
+      !confirm("Começar um kit personalizado vazio? Os slots e samples atuais serão removidos.")) return;
+  const matchingByNote = new Map();
+  for (const old of slots) {
+    if (!matchingByNote.has(old.note)) matchingByNote.set(old.note, old);
+  }
+
+  const nextSlots = [];
+  for (const [note, name] of selected) {
+    const previous = matchingByNote.get(note);
+    const slot = newSlot(
+      note, name,
+      previous ? previous.files.slice() : [],
+      previous ? previous.mode : "",
+      previous ? previous.velocityRanges.slice() : [],
+      previous ? previous.sfzVariants.slice() : []
+    );
+    nextSlots.push(slot);
+  }
+
+  slots = nextSlots;
+  render();
+});
+
+$("#newSlot").addEventListener("click", () => {
+  $("#newSlotDialog").showModal();
+});
+
+$("#onlyFilled").addEventListener("change", render);
+
+/* imagem */
+$("#pickImage").addEventListener("click", () => $("#imageInput").click());
+$("#imageInput").addEventListener("change", e => {
+  image = e.target.files[0] || null;
+  e.target.value = "";
+  showImage();
+});
+$("#clearImage").addEventListener("click", () => { image = null; showImage(); });
+function showImage() {
+  const img = $("#imgPrev");
+  if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+  if (image) { img.src = URL.createObjectURL(image); img.hidden = false; }
+  else { img.removeAttribute("src"); img.hidden = true; }
+  $("#imgName").textContent = image ? image.name : "(sem imagem)";
+  $("#clearImage").hidden = !image;
+}
+
+/* ---------- ZIP (sem compressão, sem bibliotecas) ---------- */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+async function makeZip(entries) {          // entries: [{name, data: Uint8Array | File}]
+  const enc = new TextEncoder(), parts = [], central = [];
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  let offset = 0;
+
+  for (const e of entries) {
+    const data = e.data instanceof Uint8Array ? e.data : new Uint8Array(await e.data.arrayBuffer());
+    const name = enc.encode(e.name), crc = crc32(data), len = data.length;
+
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint16(8, 0, true); h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true);
+    h.setUint32(14, crc, true); h.setUint32(18, len, true); h.setUint32(22, len, true);
+    h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+    parts.push(h.buffer, name, data);
+
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true);
+    c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true); c.setUint16(12, dosTime, true);
+    c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, len, true);
+    c.setUint32(24, len, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+    central.push(c.buffer, name);
+
+    offset += 30 + name.length + len;
+  }
+  const cdSize = central.reduce((a, p) => a + p.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true);
+  end.setUint16(10, entries.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+}
+
+/* ---------- Exportar ---------- */
+$("#export").addEventListener("click", async () => {
+  const filled = slots.filter(s => s.files.length);
+  if (!filled.length) return alert("Nenhum slot tem samples ainda.");
+  const dup = duplicateNotes();
+  if (dup.length && !confirm(`Há mais de um slot com samples nas notas ${dup.join(", ")}. Só um deles vai tocar. Exportar assim mesmo?`)) return;
+
+  const kit = safeFile($("#kitName").value.trim()) || "MeuKit";
+  const used = new Map(), entries = [], lines = [], sfzLines = [], variantSfzLines = [];
+  let hasRandomVariants = false;
+  const destinations = new Map();
+  const addSample = file => {
+    if (destinations.has(file)) return destinations.get(file);
+    const original = safeFile(file.name);
+    const dot = original.lastIndexOf(".");
+    const stem = dot > 0 ? original.slice(0, dot) : original;
+    const ext = dot > 0 ? original.slice(dot) : "";
+    let dest = original;
+    for (let i = 2; used.has(dest) && used.get(dest) !== file; i++) dest = `${stem}_${i}${ext}`;
+    if (!used.has(dest)) {
+      used.set(dest, file);
+      entries.push({ name: `${kit}/${dest}`, data: file });
+    }
+    destinations.set(file, dest);
+    return dest;
+  };
+
+  for (const s of [...filled].sort((a, b) => a.note - b.note)) {
+    const refs = [];
+    const regions = velocityRangesForExport(s);
+    for (let i = 0; i < s.files.length; i++) {
+      const f = s.files[i];
+      refs.push(addSample(f));
+      for (const range of regions[i]) {
+        const variants = s.sfzVariants[i] || [{ file: f }];
+        const representative = addSample(f);
+        sfzLines.push(`<region> sample=${representative} key=${s.note} lovel=${range.low} hivel=${range.high}`);
+        for (const variant of variants) {
+          const dest = addSample(variant.file);
+          const random = Number.isFinite(variant.lowRandom) && Number.isFinite(variant.highRandom)
+            ? ` lorand=${variant.lowRandom} hirand=${variant.highRandom}`
+            : "";
+          variantSfzLines.push(`<region> sample=${dest} key=${s.note} lovel=${range.low} hivel=${range.high}${random}`);
+          if (variants.length > 1) hasRandomVariants = true;
+        }
+      }
+    }
+    lines.push(`[${s.note}]${s.mode}${cleanName(s.name)}=${refs.join(",")}`);
+  }
+  entries.unshift({ name: `${kit}/drumkit.txt`, data: new TextEncoder().encode(lines.join("\n") + "\n") });
+  entries.push({
+    name: `${kit}/drumkit.sfz`,
+    data: new TextEncoder().encode("// Velocity ranges are preserved in this Drumlabooh-compatible SFZ file.\n" + sfzLines.join("\n") + "\n")
+  });
+  if (hasRandomVariants) {
+    entries.push({
+      name: `${kit}/drumkit-variants.sfz`,
+      data: new TextEncoder().encode(
+        "// Full SFZ variants use lorand/hirand and require a player that supports these opcodes; Drumlabooh does not support them.\n" +
+        variantSfzLines.join("\n") + "\n"
+      )
+    });
+  }
+  if (image) {
+    const ext = /\.png$/i.test(image.name) || image.type === "image/png" ? "png" : "jpg";
+    entries.push({ name: `${kit}/image.${ext}`, data: image });
+  }
+
+  const btn = $("#export");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  try {
+    const blob = await makeZip(entries);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = kit + ".zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (err) {
+    alert("Erro ao gerar o zip: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Baixar kit (.zip)";
+  }
+});
+
+/* início */
+render();
