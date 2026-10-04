@@ -90,6 +90,7 @@
     Camadas marcadas <b>auto</b> dividem 0–127 igualmente entre os samples; você pode editar os limites nos campos.
     Na exportação, abra o <code>drumkit.sfz</code> para preservar as faixas de velocity.
     Para variações da mesma batida use <b>Aleatório</b> (<code>*</code>) ou <b>Round robin</b> (<code>&gt;</code>).
+    Use o mapeamento General MIDI ou escolha <b>Personalizado - começar vazio</b> para criar só as peças desejadas.
     Importe arquivos SFZ ou kits Hydrogen para preencher os slots pelo mapeamento selecionado.
     Arraste arquivos de áudio direto sobre um slot para adicioná-los. Arraste uma camada para outra posição ou slot para reordená-la ou movê-la; a faixa de velocity acompanha o sample. Nada fica salvo ao fechar a página.
   </p>
@@ -129,6 +130,25 @@
   </form>
 </dialog>
 
+<dialog id="newSlotDialog">
+  <form id="newSlotForm" method="dialog">
+    <h2>Adicionar peça ao kit</h2>
+    <label>Peça
+      <select id="newSlotPart"></select>
+    </label>
+    <label>Nota MIDI
+      <input id="newSlotNote" type="number" min="0" max="127" value="36" required>
+    </label>
+    <label>Nome personalizado
+      <input id="newSlotName" type="text" value="Peça personalizada" required>
+    </label>
+    <div class="bar">
+      <button type="button" id="cancelNewSlot">Cancelar</button>
+      <button type="submit" class="primary" value="create">Criar slot</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 "use strict";
 
@@ -145,7 +165,10 @@ const GM_DRUMS = [
   [75,"Claves"],[76,"Hi Wood Block"],[77,"Low Wood Block"],[78,"Mute Cuica"],[79,"Open Cuica"],
   [80,"Mute Triangle"],[81,"Open Triangle"]
 ];
-const PRESETS = { "General MIDI (GM) - Percussion 35-81": GM_DRUMS };
+const PRESETS = {
+  "General MIDI (GM) - Percussion 35-81": GM_DRUMS,
+  "Personalizado - começar vazio": []
+};
 
 /* Prefixo de modo das camadas no drumkit.txt do Drumlabooh */
 const MODES = [
@@ -279,6 +302,35 @@ $("#list").addEventListener("change", e => {
   if (f === "note") s.note = Math.min(127, Math.max(0, parseInt(e.target.value, 10) || 0));
   if (f === "name") s.name = cleanName(e.target.value);
   if (f === "mode") s.mode = e.target.value;
+  render();
+});
+
+for (const [note, name] of GM_DRUMS) $("#newSlotPart").add(new Option(`${note} · ${name}`, `${note}|${name}`));
+$("#newSlotPart").add(new Option("Peça personalizada…", "custom"));
+$("#newSlotPart").value = "custom";
+
+$("#newSlotPart").addEventListener("change", () => {
+  const value = $("#newSlotPart").value;
+  if (value === "custom") {
+    $("#newSlotName").value = "Peça personalizada";
+    return;
+  }
+  const [note, ...name] = value.split("|");
+  $("#newSlotNote").value = note;
+  $("#newSlotName").value = name.join("|");
+});
+
+$("#cancelNewSlot").addEventListener("click", () => $("#newSlotDialog").close("cancel"));
+$("#newSlotForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const note = Number($("#newSlotNote").value);
+  const name = cleanName($("#newSlotName").value);
+  if (!Number.isInteger(note) || note < 0 || note > 127 || !name) {
+    alert("Informe uma nota MIDI de 0 a 127 e um nome para a peça.");
+    return;
+  }
+  slots.push(newSlot(note, name));
+  $("#newSlotDialog").close("create");
   render();
 });
 
@@ -907,6 +959,8 @@ for (const name of Object.keys(PRESETS)) $("#preset").add(new Option(name, name)
 
 $("#applyPreset").addEventListener("click", () => {
   const selected = PRESETS[$("#preset").value] || [];
+  if (!selected.length && (slots.length || slots.some(slot => slot.files.length)) &&
+      !confirm("Começar um kit personalizado vazio? Os slots e samples atuais serão removidos.")) return;
   const matchingByNote = new Map();
   for (const old of slots) {
     if (!matchingByNote.has(old.note)) matchingByNote.set(old.note, old);
@@ -929,12 +983,7 @@ $("#applyPreset").addEventListener("click", () => {
 });
 
 $("#newSlot").addEventListener("click", () => {
-  const n = parseInt(prompt("Nota MIDI (0-127):", "60"), 10);
-  if (isNaN(n) || n < 0 || n > 127) return;
-  const name = prompt("Nome do instrumento:", "Novo instrumento");
-  if (!name) return;
-  slots.push(newSlot(n, cleanName(name)));
-  render();
+  $("#newSlotDialog").showModal();
 });
 
 $("#onlyFilled").addEventListener("change", render);
