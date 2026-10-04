@@ -27,9 +27,9 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
    - **Kit General MIDI:** selecione `General MIDI (GM) - Percussion 35-81` e clique em `Aplicar`.
    - **Kit do zero:** selecione `Personalizado - começar vazio` e clique em `Aplicar`, ou use `+ Novo slot` diretamente. Use `+ Novo slot` para escolher uma peça GM ou criar uma peça personalizada informando nome e nota MIDI. Se houver slots existentes, confirme a remoção quando solicitado.
 3. Para adicionar sons manualmente, clique em `+ samples` no slot desejado ou arraste arquivos de áudio do computador para o slot. Edite o nome, a nota MIDI e o modo de seleção do slot conforme necessário.
-4. Para importar um kit, clique em `Importar kit SFZ / Hydrogen...`:
-   - **SFZ:** selecione o arquivo `.sfz` e os samples referenciados por ele.
-   - **Hydrogen:** selecione o arquivo `.h2drumkit`/ZIP ou a pasta descompactada que contém `drumkit.xml` e os samples.
+4. Para importar um kit, clique em `Importar kit SFZ / Hydrogen...` e selecione a pasta do kit. Se houver mais de um arquivo SFZ, escolha qual importar; arquivos referenciados por `#include` e samples em subpastas ou arquivos compactados são procurados automaticamente. Kits Hydrogen (`drumkit.xml`) são detectados automaticamente.
+   - **Atenção:** a importação ainda não é 100% precisa e pode apresentar erros de mapeamento ou camadas. Confira cuidadosamente os slots e samples importados antes de exportar; use com cautela.
+   - Quando uma faixa contém variações aleatórias `lorand`/`hirand`, o `drumkit.txt` inclui uma amostra representativa por faixa, mas divide velocity igualmente. Abra `drumkit.sfz` para preservar os limites originais de velocity com uma amostra representativa por faixa. O arquivo `drumkit-variants.sfz` inclui todas as variações aleatórias para outros players SFZ; o Drumlabooh não suporta esses opcodes.
    - A importação tenta associar cada instrumento ao slot mais compatível pelo nome e pela nota MIDI. Se houver uma associação ambígua, escolha o slot correto ou ignore o instrumento na janela exibida. A importação preenche slots compatíveis; para kits personalizados, crie antes os slots que deseja usar.
 5. Organize as camadas dentro de cada slot. No modo **Velocity (fraco → forte)**, camadas marcadas `auto` dividem igualmente a faixa MIDI 0-127: duas camadas recebem metade cada, três recebem um terço cada, e assim por diante. Você pode editar os limites mínimo e máximo de cada camada. Use `↑`/`↓` ou arraste para mudar a ordem; arraste uma camada para outro slot para movê-la. Também estão disponíveis os modos **Round robin** e **Aleatório**.
 6. Opcionalmente, adicione uma imagem do kit e informe o nome do kit.
@@ -43,6 +43,7 @@ O ZIP gerado contém:
 
 - `drumkit.txt` com o mapeamento final
 - `drumkit.sfz` com as faixas de velocity preservadas para abrir diretamente no Drumlabooh
+- `drumkit-variants.sfz` com samples e variações aleatórias SFZ, quando houver
 - arquivos de áudio organizados por nome
 - imagem do kit, quando houver
 

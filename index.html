@@ -90,32 +90,26 @@
   <p class="note">
     Várias camadas no mesmo slot: a ordem da lista vai do <b>mais fraco ao mais forte</b> (modo Velocity).
     Camadas marcadas <b>auto</b> dividem 0–127 igualmente entre os samples; você pode editar os limites nos campos.
-    Na exportação, abra o <code>drumkit.sfz</code> para preservar as faixas de velocity.
+    Na exportação, <code>drumkit.sfz</code> mantém velocity em formato compatível com Drumlabooh; <code>drumkit-variants.sfz</code> inclui também as variações aleatórias para players SFZ compatíveis.
     Para variações da mesma batida use <b>Aleatório</b> (<code>*</code>) ou <b>Round robin</b> (<code>&gt;</code>).
     Use o mapeamento General MIDI ou escolha <b>Personalizado - começar vazio</b> para criar só as peças desejadas.
-    Importe arquivos SFZ ou kits Hydrogen para preencher os slots pelo mapeamento selecionado.
+    Importe pastas de kits SFZ ou Hydrogen; o app detecta o formato e procura os samples automaticamente.
     Arraste arquivos de áudio direto sobre um slot para adicioná-los. Arraste uma camada para outra posição ou slot para reordená-la ou movê-la; a faixa de velocity acompanha o sample. Nada fica salvo ao fechar a página.
   </p>
 </main>
 
 <input type="file" id="audioInput" accept="audio/*,.wav,.flac,.ogg,.mp3,.aif,.aiff" multiple hidden>
-<input type="file" id="kitInput" accept=".sfz,.zip,.h2drumkit,.xml,.wav,.flac,.ogg,.mp3,.aif,.aiff" multiple hidden>
-<input type="file" id="hydrogenFolderInput" webkitdirectory multiple hidden>
+<input type="file" id="kitInput" webkitdirectory multiple hidden>
 <input type="file" id="imageInput" accept="image/png,image/jpeg" hidden>
 
 <dialog id="importDialog">
   <form method="dialog">
     <h2>Importar kit SFZ / Hydrogen</h2>
-    <p>Escolha arquivos do kit ou a pasta descompactada que contém o SFZ ou drumkit.xml e seus samples.</p>
-    <label>Como deseja selecionar?
-      <select id="importSource">
-        <option value="files">Arquivos SFZ, Hydrogen compactado ou XML + samples</option>
-        <option value="folder">Pasta descompactada com SFZ ou Hydrogen</option>
-      </select>
-    </label>
+    <p>Selecione a pasta do kit. Se houver mais de um SFZ, o app pergunta qual importar; os samples são localizados também em subpastas e arquivos compactados.</p>
+    <p class="note warn"><b>Atenção:</b> a importação ainda não é 100% precisa e pode apresentar erros de mapeamento ou camadas. Confira o resultado antes de exportar e use com cautela.</p>
     <div class="bar">
       <button value="cancel">Cancelar</button>
-      <button id="chooseImportSource" class="primary" value="choose">Selecionar...</button>
+      <button id="chooseImportSource" class="primary" value="choose">Selecionar pasta...</button>
     </div>
   </form>
 </dialog>
@@ -128,6 +122,20 @@
     <div class="bar">
       <button type="button" id="cancelUnmapped">Cancelar importação</button>
       <button type="submit" class="primary" value="apply">Aplicar escolhas</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sfzDialog">
+  <form id="sfzForm" method="dialog">
+    <h2>Qual arquivo SFZ deseja importar?</h2>
+    <p>A pasta contém mais de um SFZ. Escolha o kit principal; arquivos incluídos por ele serão carregados automaticamente.</p>
+    <label>Arquivo SFZ
+      <select id="sfzChoice" required></select>
+    </label>
+    <div class="bar">
+      <button type="button" id="cancelSfz">Cancelar</button>
+      <button type="submit" class="primary" value="choose">Importar selecionado</button>
     </div>
   </form>
 </dialog>
@@ -182,6 +190,7 @@ const MODES = [
 
 const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const noteLabel = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);   // 36 = C2
+const MAX_LAYERS_PER_SLOT = 7;
 
 /* ---------- Estado ---------- */
 let slots = [];
@@ -191,9 +200,10 @@ let targetSlotId = null;
 let draggedSample = null;
 
 const $ = s => document.querySelector(s);
-const newSlot = (note, name, files = [], mode = "", velocityRanges = []) => ({
+const newSlot = (note, name, files = [], mode = "", velocityRanges = [], sfzVariants = []) => ({
   id: nextId++, note, name, mode, files,
-  velocityRanges: files.map((_, i) => velocityRanges[i] || null)
+  velocityRanges: files.map((_, i) => velocityRanges[i] || null),
+  sfzVariants: files.map((_, i) => sfzVariants[i] || null)
 });
 const fromPreset = p => p.map(([n, name]) => newSlot(n, name));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -269,14 +279,20 @@ $("#list").addEventListener("click", e => {
   const li = b.closest("li"), i = li ? Number(li.dataset.i) : -1;
   if (act === "add") { targetSlotId = s.id; $("#audioInput").click(); return; }
   if (act === "del") { if (confirm(`Excluir o slot "${s.name}"?`)) slots = slots.filter(x => x !== s); }
-  if (act === "rm") { s.files.splice(i, 1); s.velocityRanges.splice(i, 1); }
+  if (act === "rm") {
+    s.files.splice(i, 1);
+    s.velocityRanges.splice(i, 1);
+    s.sfzVariants.splice(i, 1);
+  }
   if (act === "up" && i > 0) {
     [s.files[i - 1], s.files[i]] = [s.files[i], s.files[i - 1]];
     [s.velocityRanges[i - 1], s.velocityRanges[i]] = [s.velocityRanges[i], s.velocityRanges[i - 1]];
+    [s.sfzVariants[i - 1], s.sfzVariants[i]] = [s.sfzVariants[i], s.sfzVariants[i - 1]];
   }
   if (act === "down" && i < s.files.length - 1) {
     [s.files[i + 1], s.files[i]] = [s.files[i], s.files[i + 1]];
     [s.velocityRanges[i + 1], s.velocityRanges[i]] = [s.velocityRanges[i], s.velocityRanges[i + 1]];
+    [s.sfzVariants[i + 1], s.sfzVariants[i]] = [s.sfzVariants[i], s.sfzVariants[i + 1]];
   }
   if (act === "play") { play(s.files[i]); return; }
   render();
@@ -393,12 +409,19 @@ list.addEventListener("drop", e => {
     ? Number(targetRow.dataset.i)
     : destination.files.length;
   if (!source || !source.files[sourceIndex]) { draggedSample = null; return; }
+  if (source !== destination && destination.files.length >= MAX_LAYERS_PER_SLOT) {
+    alert(`Cada peça aceita no máximo ${MAX_LAYERS_PER_SLOT} camadas.`);
+    draggedSample = null;
+    return;
+  }
 
   const [file] = source.files.splice(sourceIndex, 1);
   const [velocityRange] = source.velocityRanges.splice(sourceIndex, 1);
+  const [sfzVariants] = source.sfzVariants.splice(sourceIndex, 1);
   const insertIndex = source === destination && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
   destination.files.splice(insertIndex, 0, file);
   destination.velocityRanges.splice(insertIndex, 0, velocityRange ?? null);
+  destination.sfzVariants.splice(insertIndex, 0, sfzVariants ?? null);
   draggedSample = null;
   render();
 });
@@ -406,7 +429,15 @@ list.addEventListener("drop", e => {
 function addFiles(s, fileList) {
   const audio = [...fileList].filter(f => f.type.startsWith("audio/") || /\.(wav|flac|ogg|mp3|aiff?)$/i.test(f.name));
   audio.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  for (const f of audio) { s.files.push(f); s.velocityRanges.push(null); }
+  const available = Math.max(0, MAX_LAYERS_PER_SLOT - s.files.length);
+  for (const f of audio.slice(0, available)) {
+    s.files.push(f);
+    s.velocityRanges.push(null);
+    s.sfzVariants.push(null);
+  }
+  if (audio.length > available) {
+    alert(`Cada peça aceita no máximo ${MAX_LAYERS_PER_SLOT} camadas. ${audio.length - available} arquivo(s) não foram adicionados.`);
+  }
   render();
 }
 
@@ -421,10 +452,32 @@ $("#importKit").addEventListener("click", () => $("#importDialog").showModal());
 $("#chooseImportSource").addEventListener("click", e => {
   e.preventDefault();
   $("#importDialog").close();
-  if ($("#importSource").value === "folder") $("#hydrogenFolderInput").click();
-  else $("#kitInput").click();
+  $("#kitInput").click();
 });
 $("#cancelUnmapped").addEventListener("click", () => $("#unmappedDialog").close("cancel"));
+$("#cancelSfz").addEventListener("click", () => $("#sfzDialog").close("cancel"));
+
+function chooseSfzEntry(entries) {
+  const dialog = $("#sfzDialog");
+  const form = $("#sfzForm");
+  const select = $("#sfzChoice");
+  select.replaceChildren(...entries.map((entry, index) =>
+    new Option(entry.path, String(index))
+  ));
+  dialog.showModal();
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      dialog.close("choose");
+    };
+    const onClose = () => {
+      form.removeEventListener("submit", onSubmit);
+      resolve(dialog.returnValue === "choose" ? entries[Number(select.value)] : null);
+    };
+    form.addEventListener("submit", onSubmit, { once: true });
+    dialog.addEventListener("close", onClose, { once: true });
+  });
+}
 
 function chooseUnmappedSlots(groups) {
   const dialog = $("#unmappedDialog");
@@ -479,9 +532,8 @@ async function handleKitSelection(input, description) {
   }
 }
 
-$("#hydrogenFolderInput").addEventListener("change", e => handleKitSelection(e.target, "a pasta"));
 $("#kitInput").addEventListener("change", async e => {
-  await handleKitSelection(e.target, "o kit");
+  await handleKitSelection(e.target, "a pasta do kit");
 });
 
 const normalizePath = path => {
@@ -602,10 +654,68 @@ function findCatalogFile(catalog, relativePath, basePath = "") {
   return catalog.exact.get(fullPath) || catalog.exact.get(normalizePath(path)) || catalog.byName.get(normalizePath(path.split("/").pop())) || null;
 }
 
+async function expandSfzIncludes(text, sfzEntry, entries, macros = new Map(), active = new Set()) {
+  const currentPath = normalizePath(sfzEntry.path);
+  if (active.has(currentPath)) throw new Error(`Ciclo de #include detectado em "${sfzEntry.path}".`);
+  active.add(currentPath);
+  const output = [];
+  const expandMacros = value => {
+    let expanded = value;
+    for (let pass = 0; pass < 32; pass++) {
+      const next = expanded.replace(/\$[A-Za-z_]\w*/g, name => macros.get(name) ?? name);
+      if (next === expanded) return expanded;
+      expanded = next;
+    }
+    throw new Error(`Expansão excessiva de macros no arquivo "${sfzEntry.name}".`);
+  };
+
+  try {
+    for (const line of text.split(/\r?\n/)) {
+      const define = line.match(/^\s*#define\s+(\$[A-Za-z_]\w*)\s+(.+?)\s*$/i);
+      if (define) {
+        macros.set(define[1], define[2].replace(/\s+\/\/.*$/, "").trim());
+        continue;
+      }
+      const include = line.match(/^\s*#include\s+["']([^"']+)["']/i);
+      if (include) {
+        const base = sfzEntry.path.includes("/") ? sfzEntry.path.slice(0, sfzEntry.path.lastIndexOf("/")) : "";
+        const includePath = normalizePath(base ? `${base}/${include[1]}` : include[1]);
+        const exactMatch = entries.find(entry => normalizePath(entry.path) === includePath);
+        const suffix = `/${normalizePath(include[1])}`;
+        const suffixMatches = exactMatch ? [] : entries.filter(entry =>
+          normalizePath(entry.path).endsWith(suffix)
+        );
+        if (suffixMatches.length > 1) {
+          throw new Error(`Há mais de um arquivo que corresponde ao include "${include[1]}": ${suffixMatches.map(entry => entry.path).join(", ")}.`);
+        }
+        const includedEntry = exactMatch || suffixMatches[0];
+        if (!includedEntry) throw new Error(`Arquivo incluído no SFZ não encontrado: "${include[1]}" (referenciado por "${sfzEntry.path}").`);
+        output.push(await expandSfzIncludes(await includedEntry.file.text(), includedEntry, entries, macros, active));
+        continue;
+      }
+      output.push(expandMacros(line));
+    }
+  } finally {
+    active.delete(currentPath);
+  }
+  return output.join("\n");
+}
+
 function parseOpcodes(text) {
   const result = {};
-  const pattern = /([A-Za-z_][\w]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))/g;
-  for (const match of text.matchAll(pattern)) result[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4];
+  const source = text.replace(/(^|\s)\/\/.*$/gm, "$1");
+  const pattern = /(?:^|\s)([A-Za-z_][\w]*)\s*=/gm;
+  const matches = [...source.matchAll(pattern)];
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    const start = match.index + match[0].length;
+    const end = matches[i + 1]?.index ?? source.length;
+    let value = source.slice(start, end).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (value) result[match[1].toLowerCase()] = value;
+  }
   return result;
 }
 
@@ -647,7 +757,8 @@ function importSfz(text, sfzEntry, catalog) {
   const zones = [];
   for (const region of sfzRegions(text)) {
     if (!region.sample) continue;
-    const file = findCatalogFile(catalog, region.sample, base);
+    const sampleBase = [base, region.default_path].filter(Boolean).join("/");
+    const file = findCatalogFile(catalog, region.sample, sampleBase);
     if (!file) throw new Error(`Sample SFZ não encontrado: "${region.sample}". Selecione o SFZ junto com seus samples.`);
     const low = Math.max(0, Number.parseInt(region.lokey ?? region.key ?? "0", 10));
     const high = Math.min(127, Number.parseInt(region.hikey ?? region.key ?? "127", 10));
@@ -660,12 +771,123 @@ function importSfz(text, sfzEntry, catalog) {
       note,
       lowVelocity: hasVelocityRange ? lowVelocity : null,
       highVelocity: hasVelocityRange ? highVelocity : null,
+      lowRandom: region.lorand === undefined ? null : Number.parseFloat(region.lorand),
+      highRandom: region.hirand === undefined ? null : Number.parseFloat(region.hirand),
+      sfzPath: sfzEntry.path,
+      sourceFormat: "sfz",
       label,
       file
     });
   }
   if (!zones.length) throw new Error(`Nenhuma região com sample foi encontrada em "${sfzEntry.name}".`);
   return zones;
+}
+
+function collapseSfzRandomVariants(zones) {
+  const groups = new Map();
+  for (const zone of zones) {
+    if (zone.lowRandom === null && zone.highRandom === null) continue;
+    const key = [
+      zone.sfzPath, zone.note, zone.lowVelocity, zone.highVelocity
+    ].join("|");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(zone);
+  }
+
+  const replacements = new Map();
+  for (const [key, variants] of groups) {
+    if (variants.length < 2 || variants.some(zone =>
+      zone.lowRandom === null || zone.highRandom === null ||
+      !Number.isFinite(zone.lowRandom) || !Number.isFinite(zone.highRandom)
+    )) continue;
+    const sorted = [...variants].sort((a, b) => a.lowRandom - b.lowRandom);
+    let boundary = 0;
+    const contiguous = sorted.every(zone => {
+      const matches = Math.abs(zone.lowRandom - boundary) < 0.00001;
+      boundary = zone.highRandom;
+      return matches && zone.highRandom > zone.lowRandom && zone.highRandom <= 1;
+    });
+    if (!contiguous || Math.abs(boundary - 1) >= 0.00001) continue;
+
+    const representative = { ...sorted[0] };
+    representative.sfzVariants = sorted.map(zone => ({
+      file: zone.file,
+      lowRandom: zone.lowRandom,
+      highRandom: zone.highRandom
+    }));
+    replacements.set(key, representative);
+  }
+
+  const emitted = new Set();
+  const result = [];
+  for (const zone of zones) {
+    const key = [
+      zone.sfzPath, zone.note, zone.lowVelocity, zone.highVelocity
+    ].join("|");
+    const representative = replacements.get(key);
+    if (!representative) {
+      result.push(zone);
+      continue;
+    }
+    if (!emitted.has(key)) {
+      result.push(representative);
+      emitted.add(key);
+    }
+  }
+  return result;
+}
+
+function limitLayersPerSlot(zones, limit) {
+  const unique = [];
+  const sfzRanges = new Set();
+  let discarded = 0;
+  for (const zone of zones) {
+    if (zone.sourceFormat === "sfz") {
+      const key = `${zone.lowVelocity ?? 0}|${zone.highVelocity ?? 127}`;
+      if (sfzRanges.has(key)) {
+        discarded++;
+        continue;
+      }
+      sfzRanges.add(key);
+    }
+    unique.push(zone);
+  }
+  if (limit <= 0) return { zones: [], discarded: unique.length + discarded };
+  if (unique.length <= limit) return { zones: unique, discarded };
+  discarded += unique.length - limit;
+  const sorted = [...unique].sort((a, b) =>
+    (a.lowVelocity ?? 0) - (b.lowVelocity ?? 0) ||
+    (a.highVelocity ?? 127) - (b.highVelocity ?? 127) ||
+    a.file.name.localeCompare(b.file.name, undefined, { numeric: true })
+  );
+  const reduced = [];
+  for (let i = 0; i < limit; i++) {
+    const start = Math.floor(i * sorted.length / limit);
+    const end = Math.floor((i + 1) * sorted.length / limit);
+    const group = sorted.slice(start, end);
+    const middle = (group[0].lowVelocity ?? 0) / 2 + (group[group.length - 1].highVelocity ?? 127) / 2;
+    const representative = group.reduce((best, zone) => {
+      const center = (zone.lowVelocity ?? 0) / 2 + (zone.highVelocity ?? 127) / 2;
+      return Math.abs(center - middle) < Math.abs(
+        ((best.lowVelocity ?? 0) / 2 + (best.highVelocity ?? 127) / 2) - middle
+      ) ? zone : best;
+    });
+    if (group.every(zone => zone.lowVelocity !== null && zone.highVelocity !== null)) {
+      reduced.push({
+        ...representative,
+        lowVelocity: Math.min(...group.map(zone => zone.lowVelocity)),
+        highVelocity: Math.max(...group.map(zone => zone.highVelocity)),
+        sfzVariants: null
+      });
+    } else {
+      reduced.push(representative);
+    }
+  }
+  if (reduced.length > limit) {
+    discarded += reduced.length - limit;
+    return { zones: reduced.slice(0, limit), discarded };
+  }
+  return { zones: reduced, discarded };
 }
 
 function importHydrogen(xmlText, xmlEntry, catalog) {
@@ -715,7 +937,8 @@ function importHydrogen(xmlText, xmlEntry, catalog) {
 
 function instrumentFamily(value) {
   const name = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/[^a-z0-9]+/g, " ").trim();
+    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ").trim();
   const families = [
     ["side stick", "sidestick"], ["sidestick", "sidestick"], ["cross stick", "sidestick"],
     ["rimshot", "snare"], ["snare", "snare"], ["caixa", "snare"],
@@ -723,7 +946,7 @@ function instrumentFamily(value) {
     ["clap", "clap"], ["palma", "clap"],
     ["hi hat", "hihat"], ["hihat", "hihat"], ["high hat", "hihat"], ["chimbal", "hihat"], ["hat", "hihat"], ["hh", "hihat"],
     ["tom", "tom"], ["cowbell", "cowbell"], ["ride bell", "ride"], ["ridebell", "ride"], ["rideb", "ride"], ["ride", "ride"],
-    ["crash", "crash"], ["china", "china"],
+    ["crash", "crash"], ["choke", "choke"], ["chinese cymbal", "china"], ["china", "china"],
     ["splash", "splash"], ["tambourine", "tambourine"], ["pandeiro", "tambourine"], ["bongo", "bongo"], ["conga", "conga"],
     ["timbale", "timbale"], ["agogo", "agogo"], ["cabasa", "cabasa"], ["maraca", "maracas"],
     ["shaker", "shaker"], ["guiro", "guiro"], ["clave", "claves"], ["wood block", "woodblock"],
@@ -737,7 +960,8 @@ function instrumentFamily(value) {
 
 function bestMappedSlot(zone) {
   const normalizeWords = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/[^a-z0-9]+/g, " ").trim();
+    .replace(/([a-z])([0-9])/g, "$1 $2").replace(/([0-9])([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ").trim();
   const hasTerm = (text, term) => (` ${text} `).includes(` ${normalizeWords(term)} `);
   const sourceLabel = normalizeWords(zone.label);
   const sourceFile = normalizeWords(zone.file.name);
@@ -776,7 +1000,16 @@ function bestMappedSlot(zone) {
   const sourceQualifier = labelQualifier || fileQualifier;
   if (labelFamily && fileFamily === labelFamily && labelQualifier && fileQualifier &&
       labelQualifier !== fileQualifier) return null;
-  const noteSlot = slots.find(slot => slot.note === zone.note);
+
+  const exactNoteSlot = slots.find(slot => slot.note === zone.note);
+  const exactNoteFamily = exactNoteSlot && instrumentFamily(exactNoteSlot.name);
+  if (exactNoteSlot && (!exactNoteFamily || exactNoteFamily === sourceFamily)) {
+    const noteQualifier = exactNoteFamily === sourceFamily ? qualifiers(normalizeWords(exactNoteSlot.name)) : "";
+    if (!sourceQualifier || !noteQualifier || noteQualifier === sourceQualifier) return exactNoteSlot;
+    if (noteQualifier && sourceQualifier && noteQualifier !== sourceQualifier) return null;
+  }
+
+  const noteSlot = exactNoteSlot;
   const noteFamily = noteSlot && instrumentFamily(noteSlot.name);
   const noteQualifier = noteFamily === sourceFamily ? qualifiers(normalizeWords(noteSlot.name)) : "";
 
@@ -900,15 +1133,21 @@ async function importKit(selectedFiles) {
   const catalog = fileCatalog(entries);
   const pending = [];
   const sfz = entries.filter(entry => /\.sfz$/i.test(entry.name));
+  const selectedSfz = sfz.length > 1 ? await chooseSfzEntry(sfz) : sfz[0] || null;
+  if (sfz.length > 1 && !selectedSfz) throw new Error("Seleção de arquivo SFZ cancelada.");
   const hydrogen = entries.filter(entry => /(^|\/)drumkit\.xml$/i.test(entry.path));
   const ignored = [];
-  for (const entry of sfz) pending.push(...importSfz(await entry.file.text(), entry, catalog));
+  if (selectedSfz) {
+    const expandedSfz = await expandSfzIncludes(await selectedSfz.file.text(), selectedSfz, entries);
+    pending.push(...importSfz(expandedSfz, selectedSfz, catalog));
+  }
   for (const entry of hydrogen) pending.push(...importHydrogen(await entry.file.text(), entry, catalog));
-  if (!pending.length) throw new Error("Selecione um arquivo SFZ ou um kit Hydrogen (.h2drumkit, ZIP ou drumkit.xml com os samples).");
+  const importZones = collapseSfzRandomVariants(pending);
+  if (!importZones.length) throw new Error("Não foi encontrado nenhum SFZ ou kit Hydrogen nesta pasta.");
 
   const byNote = new Map();
   const unmatched = new Map();
-  for (const zone of pending) {
+  for (const zone of importZones) {
     const slot = bestMappedSlot(zone);
     if (slot) {
       if (!byNote.has(slot.id)) byNote.set(slot.id, { slot, zones: [] });
@@ -934,21 +1173,39 @@ async function importKit(selectedFiles) {
     });
   }
   let added = 0;
+  let discardedLayers = 0;
+  let preservedVariants = 0;
   for (const { slot, zones } of byNote.values()) {
-    zones.sort((a, b) => a.lowVelocity - b.lowVelocity || a.file.name.localeCompare(b.file.name, undefined, { numeric: true }));
-    for (const zone of zones) {
+    const remaining = Math.max(0, MAX_LAYERS_PER_SLOT - slot.files.length);
+    const limited = limitLayersPerSlot(zones, remaining);
+    discardedLayers += limited.discarded;
+    const layers = limited.zones
+      .sort((a, b) =>
+        (a.lowVelocity ?? 0) - (b.lowVelocity ?? 0) ||
+        a.file.name.localeCompare(b.file.name, undefined, { numeric: true })
+      )
+      .slice(0, remaining);
+    for (const zone of layers) {
       slot.files.push(zone.file);
       slot.velocityRanges.push(zone.lowVelocity === null || zone.highVelocity === null
         ? null
         : { low: zone.lowVelocity, high: zone.highVelocity });
+      slot.sfzVariants.push(zone.sfzVariants || null);
+      preservedVariants += Math.max(0, (zone.sfzVariants?.length || 1) - 1);
     }
-    added += zones.length;
-    if (zones.length > 1) slot.mode = "";
+    added += layers.length;
+    if (layers.length > 1) slot.mode = "";
   }
   render();
   const missing = [...new Set(ignored)].sort((a, b) => a - b);
   const details = [];
   if (missing.length) details.push(`Notas sem slot neste mapeamento: ${missing.join(", ")}.`);
+  if (discardedLayers) details.push(
+    `${discardedLayers} camada(s) removida(s)/combinada(s): ficou só uma por faixa de velocity e no máximo ${MAX_LAYERS_PER_SLOT} por peça.`
+  );
+  if (preservedVariants) details.push(
+    `${preservedVariants} variação(ões) aleatória(s) preservada(s) em drumkit-variants.sfz; use drumkit.sfz para manter as faixas originais de velocity com uma amostra representativa por faixa.`
+  );
   if (!added) throw new Error(`Nenhum sample corresponde às notas do mapeamento selecionado.${details.length ? ` ${details.join(" ")}` : ""}`);
   alert(`${added} sample(s) importado(s) em ${byNote.size} slot(s).${details.length ? `\n${details.join("\n")}` : ""}`);
 }
@@ -988,7 +1245,8 @@ $("#applyPreset").addEventListener("click", () => {
       note, name,
       previous ? previous.files.slice() : [],
       previous ? previous.mode : "",
-      previous ? previous.velocityRanges.slice() : []
+      previous ? previous.velocityRanges.slice() : [],
+      previous ? previous.sfzVariants.slice() : []
     );
     nextSlots.push(slot);
   }
@@ -1073,20 +1331,43 @@ $("#export").addEventListener("click", async () => {
   if (dup.length && !confirm(`Há mais de um slot com samples nas notas ${dup.join(", ")}. Só um deles vai tocar. Exportar assim mesmo?`)) return;
 
   const kit = safeFile($("#kitName").value.trim()) || "MeuKit";
-  const used = new Map(), entries = [], lines = [], sfzLines = [];
+  const used = new Map(), entries = [], lines = [], sfzLines = [], variantSfzLines = [];
+  let hasRandomVariants = false;
+  const destinations = new Map();
+  const addSample = file => {
+    if (destinations.has(file)) return destinations.get(file);
+    const original = safeFile(file.name);
+    const dot = original.lastIndexOf(".");
+    const stem = dot > 0 ? original.slice(0, dot) : original;
+    const ext = dot > 0 ? original.slice(dot) : "";
+    let dest = original;
+    for (let i = 2; used.has(dest) && used.get(dest) !== file; i++) dest = `${stem}_${i}${ext}`;
+    if (!used.has(dest)) {
+      used.set(dest, file);
+      entries.push({ name: `${kit}/${dest}`, data: file });
+    }
+    destinations.set(file, dest);
+    return dest;
+  };
 
   for (const s of [...filled].sort((a, b) => a.note - b.note)) {
     const refs = [];
     const regions = velocityRangesForExport(s);
     for (let i = 0; i < s.files.length; i++) {
       const f = s.files[i];
-      let dest = safeFile(f.name);
-      const dot = dest.lastIndexOf("."), stem = dot > 0 ? dest.slice(0, dot) : dest, ext = dot > 0 ? dest.slice(dot) : "";
-      for (let i = 2; used.has(dest) && used.get(dest) !== f; i++) dest = `${stem}_${i}${ext}`;
-      if (!used.has(dest)) { used.set(dest, f); entries.push({ name: `${kit}/${dest}`, data: f }); }
-      refs.push(dest);
+      refs.push(addSample(f));
       for (const range of regions[i]) {
-        sfzLines.push(`<region> sample=${dest} key=${s.note} lovel=${range.low} hivel=${range.high}`);
+        const variants = s.sfzVariants[i] || [{ file: f }];
+        const representative = addSample(f);
+        sfzLines.push(`<region> sample=${representative} key=${s.note} lovel=${range.low} hivel=${range.high}`);
+        for (const variant of variants) {
+          const dest = addSample(variant.file);
+          const random = Number.isFinite(variant.lowRandom) && Number.isFinite(variant.highRandom)
+            ? ` lorand=${variant.lowRandom} hirand=${variant.highRandom}`
+            : "";
+          variantSfzLines.push(`<region> sample=${dest} key=${s.note} lovel=${range.low} hivel=${range.high}${random}`);
+          if (variants.length > 1) hasRandomVariants = true;
+        }
       }
     }
     lines.push(`[${s.note}]${s.mode}${cleanName(s.name)}=${refs.join(",")}`);
@@ -1094,8 +1375,17 @@ $("#export").addEventListener("click", async () => {
   entries.unshift({ name: `${kit}/drumkit.txt`, data: new TextEncoder().encode(lines.join("\n") + "\n") });
   entries.push({
     name: `${kit}/drumkit.sfz`,
-    data: new TextEncoder().encode("// Velocity ranges are preserved in this SFZ file.\n" + sfzLines.join("\n") + "\n")
+    data: new TextEncoder().encode("// Velocity ranges are preserved in this Drumlabooh-compatible SFZ file.\n" + sfzLines.join("\n") + "\n")
   });
+  if (hasRandomVariants) {
+    entries.push({
+      name: `${kit}/drumkit-variants.sfz`,
+      data: new TextEncoder().encode(
+        "// Full SFZ variants use lorand/hirand and require a player that supports these opcodes; Drumlabooh does not support them.\n" +
+        variantSfzLines.join("\n") + "\n"
+      )
+    });
+  }
   if (image) {
     const ext = /\.png$/i.test(image.name) || image.type === "image/png" ? "png" : "jpg";
     entries.push({ name: `${kit}/image.${ext}`, data: image });
