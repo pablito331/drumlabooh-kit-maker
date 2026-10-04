@@ -61,9 +61,11 @@
 <main>
   <div class="bar">
     <label>Mapeamento
-      <select id="preset"></select>
+      <select id="preset">
+        <option value="" selected disabled>Escolha um mapeamento...</option>
+      </select>
     </label>
-    <button id="applyPreset">Aplicar</button>
+    <button id="applyPreset" disabled>Aplicar</button>
     <button id="newSlot">+ Novo slot</button>
     <button id="importKit">Importar kit SFZ / Hydrogen...</button>
     <label><input type="checkbox" id="onlyFilled"> só slots com samples</label>
@@ -205,6 +207,13 @@ function render() {
   const list = $("#list");
   list.innerHTML = "";
   const dup = duplicateNotes();
+
+  if (!slots.length) {
+    const empty = document.createElement("p");
+    empty.className = "note";
+    empty.textContent = "Nenhum slot ainda. Escolha um mapeamento e clique em Aplicar, ou use + Novo slot para criar seu kit do zero.";
+    list.appendChild(empty);
+  }
 
   for (const s of slots) {
     if (only && !s.files.length) continue;
@@ -957,8 +966,14 @@ function play(file) {
 /* presets e novos slots */
 for (const name of Object.keys(PRESETS)) $("#preset").add(new Option(name, name));
 
+$("#preset").addEventListener("change", () => {
+  $("#applyPreset").disabled = !$("#preset").value;
+});
+
 $("#applyPreset").addEventListener("click", () => {
-  const selected = PRESETS[$("#preset").value] || [];
+  const preset = PRESETS[$("#preset").value];
+  if (!preset) return;
+  const selected = preset;
   if (!selected.length && (slots.length || slots.some(slot => slot.files.length)) &&
       !confirm("Começar um kit personalizado vazio? Os slots e samples atuais serão removidos.")) return;
   const matchingByNote = new Map();
@@ -1103,7 +1118,6 @@ $("#export").addEventListener("click", async () => {
 });
 
 /* início */
-slots = fromPreset(GM_DRUMS);
 render();
 </script>
 </body>

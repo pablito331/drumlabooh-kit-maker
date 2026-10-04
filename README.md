@@ -23,9 +23,9 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
 ## Como usar
 
 1. Abra o [app no GitHub Pages](https://pablito331.github.io/drumlabooh-kit-maker/) ou, se preferir, abra `index.html` no navegador.
-2. Escolha como começar:
-   - **Kit General MIDI:** mantenha `General MIDI (GM) - Percussion 35-81` e clique em `Aplicar`.
-   - **Kit do zero:** selecione `Personalizado - começar vazio` e clique em `Aplicar`. Confirme a remoção dos slots existentes, se solicitado. Use `+ Novo slot` para escolher uma peça GM ou criar uma peça personalizada informando nome e nota MIDI.
+2. O app abre sem slots. Escolha como começar:
+   - **Kit General MIDI:** selecione `General MIDI (GM) - Percussion 35-81` e clique em `Aplicar`.
+   - **Kit do zero:** selecione `Personalizado - começar vazio` e clique em `Aplicar`, ou use `+ Novo slot` diretamente. Use `+ Novo slot` para escolher uma peça GM ou criar uma peça personalizada informando nome e nota MIDI. Se houver slots existentes, confirme a remoção quando solicitado.
 3. Para adicionar sons manualmente, clique em `+ samples` no slot desejado ou arraste arquivos de áudio do computador para o slot. Edite o nome, a nota MIDI e o modo de seleção do slot conforme necessário.
 4. Para importar um kit, clique em `Importar kit SFZ / Hydrogen...`:
    - **SFZ:** selecione o arquivo `.sfz` e os samples referenciados por ele.
