@@ -23,7 +23,7 @@ O Drumlabooh Kit Maker ajuda a organizar sons de bateria em um kit de forma ráp
 3. Clique em `Aplicar` para ativar o mapeamento escolhido.
 4. Clique em `Importar kit SFZ / Hydrogen...` e escolha selecionar arquivos ou uma pasta descompactada. Para SFZ, selecione o `.sfz` junto com os samples referenciados. Para Hydrogen, selecione o `.h2drumkit`/ZIP ou a pasta com `drumkit.xml` e os samples. A importação acontece no navegador.
 5. Os samples são associados à peça mais compatível no mapeamento General MIDI, usando o nome do instrumento e a nota MIDI em conjunto. No SFZ, as regiões e faixas de velocidade são usadas para ordenar as camadas. Kits Hydrogen usam o nome, `midiOutNote` e as camadas do `drumkit.xml`. Se o nome e a nota indicarem articulações diferentes, a peça aparece em uma janela para você escolher o slot ou ignorá-la.
-6. Ajuste notas, nomes e modos dos slots. Quando houver várias camadas, edite os limites mínimo e máximo de velocity nos campos de cada sample. Use as setas `↑` e `↓` ou arraste um sample para reordenar as camadas; arraste-o para outro slot para movê-lo. As faixas de velocity acompanham cada sample. Também é possível arrastar arquivos de áudio do computador para um slot.
+6. Ajuste notas, nomes e modos dos slots. Quando houver várias camadas, o app divide automaticamente a faixa 0-127 igualmente entre os samples marcados `auto`; edite os limites mínimo e máximo nos campos de cada camada se desejar. Use as setas `↑` e `↓` ou arraste um sample para reordenar as camadas; arraste-o para outro slot para movê-lo. As faixas de velocity acompanham cada sample. Também é possível arrastar arquivos de áudio do computador para um slot.
 7. Opcionalmente, adicione uma imagem do kit.
 8. Clique em `Baixar kit (.zip)`.
 

@@ -37,6 +37,7 @@
   .files .idx { color:var(--mut); width:22px; text-align:right; }
   .files .velocity { display:flex; align-items:center; gap:4px; color:var(--mut); font-size:12px; white-space:nowrap; }
   .files .velocity input { width:48px; padding:2px 4px; text-align:center; }
+  .files .velocity .auto { color:var(--acc); font-size:11px; font-weight:600; }
   .mini { padding:2px 8px; }
   .unmapped-list { display:grid; gap:10px; max-height:55vh; overflow:auto; min-width:min(70vw,560px); }
   .unmapped-row { display:grid; gap:5px; padding:10px; border:1px solid var(--line); border-radius:8px; }
@@ -86,7 +87,8 @@
 
   <p class="note">
     Várias camadas no mesmo slot: a ordem da lista vai do <b>mais fraco ao mais forte</b> (modo Velocity).
-    Na exportação, abra o <code>drumkit.sfz</code> para preservar as faixas de velocity de origem.
+    Camadas marcadas <b>auto</b> dividem 0–127 igualmente entre os samples; você pode editar os limites nos campos.
+    Na exportação, abra o <code>drumkit.sfz</code> para preservar as faixas de velocity.
     Para variações da mesma batida use <b>Aleatório</b> (<code>*</code>) ou <b>Round robin</b> (<code>&gt;</code>).
     Importe arquivos SFZ ou kits Hydrogen para preencher os slots pelo mapeamento selecionado.
     Arraste arquivos de áudio direto sobre um slot para adicioná-los. Arraste uma camada para outra posição ou slot para reordená-la ou movê-la; a faixa de velocity acompanha o sample. Nada fica salvo ao fechar a página.
@@ -205,6 +207,7 @@ function render() {
           <button class="mini" data-act="play" title="Ouvir">▶</button>
           <span class="fn" title="${esc(f.name)}">${esc(f.name)}</span>
           ${s.files.length > 1 ? `<span class="velocity" aria-label="Faixa de velocity da camada ${i + 1}">
+            ${!s.velocityRanges[i] || hasAutomaticVelocitySplit(s) ? '<span class="auto">auto</span>' : ""}
             vel <input type="number" min="0" max="127" value="${velocityRanges[i]?.[0]?.low ?? 0}" data-field="velocityLow" data-i="${i}" aria-label="Velocity mínima">
             – <input type="number" min="0" max="127" value="${velocityRanges[i]?.[0]?.high ?? 127}" data-field="velocityHigh" data-i="${i}" aria-label="Velocity máxima">
           </span>` : ""}
@@ -587,11 +590,18 @@ function importSfz(text, sfzEntry, catalog) {
     if (!file) throw new Error(`Sample SFZ não encontrado: "${region.sample}". Selecione o SFZ junto com seus samples.`);
     const low = Math.max(0, Number.parseInt(region.lokey ?? region.key ?? "0", 10));
     const high = Math.min(127, Number.parseInt(region.hikey ?? region.key ?? "127", 10));
+    const hasVelocityRange = region.lovel !== undefined || region.hivel !== undefined;
     const lowVelocity = Math.max(0, Number.parseInt(region.lovel ?? "0", 10));
     const highVelocity = Math.min(127, Number.parseInt(region.hivel ?? "127", 10));
     if (![low, high, lowVelocity, highVelocity].every(Number.isFinite) || low > high || lowVelocity > highVelocity) continue;
     const label = [region.label, region.region_label, region.group_label, file.name.replace(/\.[^.]+$/, "")].filter(Boolean).join(" ");
-    for (let note = low; note <= high; note++) zones.push({ note, lowVelocity, highVelocity, label, file });
+    for (let note = low; note <= high; note++) zones.push({
+      note,
+      lowVelocity: hasVelocityRange ? lowVelocity : null,
+      highVelocity: hasVelocityRange ? highVelocity : null,
+      label,
+      file
+    });
   }
   if (!zones.length) throw new Error(`Nenhuma região com sample foi encontrada em "${sfzEntry.name}".`);
   return zones;
@@ -619,14 +629,23 @@ function importHydrogen(xmlText, xmlEntry, catalog) {
       if (!file) throw new Error(`Sample Hydrogen não encontrado: "${path}".`);
       let layer = filename.parentElement;
       while (layer && layer !== instrument && layer.localName.toLowerCase() !== "layer") layer = layer.parentElement;
-      const velocityMin = Number.parseFloat(xmlElements(layer || instrument, "min")[0]?.textContent ?? "0");
-      const velocityMax = Number.parseFloat(xmlElements(layer || instrument, "max")[0]?.textContent ?? "1");
+      const minElement = xmlElements(layer || instrument, "min")[0];
+      const maxElement = xmlElements(layer || instrument, "max")[0];
+      const velocityMin = Number.parseFloat(minElement?.textContent ?? "0");
+      const velocityMax = Number.parseFloat(maxElement?.textContent ?? "1");
       const lowVelocity = Number.isFinite(velocityMin) ? Math.ceil(Math.min(1, Math.max(0, velocityMin)) * 127) : 0;
       const highVelocity = Number.isFinite(velocityMax)
         ? (velocityMax >= 1 ? 127 : Math.ceil(Math.min(1, Math.max(0, velocityMax)) * 127) - 1)
         : 127;
       if (lowVelocity > highVelocity) continue;
-      zones.push({ note, lowVelocity, highVelocity, file, label });
+      const hasVelocityRange = !!minElement || !!maxElement;
+      zones.push({
+        note,
+        lowVelocity: hasVelocityRange ? lowVelocity : null,
+        highVelocity: hasVelocityRange ? highVelocity : null,
+        file,
+        label
+      });
     }
   }
   if (!zones.length) throw new Error("Não foram encontrados instrumentos com nota MIDI e samples no drumkit.xml.");
@@ -760,11 +779,23 @@ function bestMappedSlot(zone) {
   return best;
 }
 
+function hasAutomaticVelocitySplit(slot) {
+  return slot.files.length > 1 && slot.velocityRanges.every(range =>
+    !range || (range.low === 0 && range.high === 127)
+  );
+}
+
 function velocityRangesForExport(slot) {
   const ranges = slot.files.map((_, i) => {
     const range = slot.velocityRanges[i];
     return range ? [{ low: range.low, high: range.high }] : [];
   });
+  if (hasAutomaticVelocitySplit(slot)) {
+    return ranges.map((_, i) => [{
+      low: Math.floor(i * 128 / ranges.length),
+      high: Math.floor((i + 1) * 128 / ranges.length) - 1
+    }]);
+  }
   const missing = ranges.map((items, index) => items.length ? -1 : index).filter(index => index >= 0);
   const hasSourceRanges = missing.length !== ranges.length;
   if (!hasSourceRanges) {
@@ -846,7 +877,9 @@ async function importKit(selectedFiles) {
     zones.sort((a, b) => a.lowVelocity - b.lowVelocity || a.file.name.localeCompare(b.file.name, undefined, { numeric: true }));
     for (const zone of zones) {
       slot.files.push(zone.file);
-      slot.velocityRanges.push({ low: zone.lowVelocity, high: zone.highVelocity });
+      slot.velocityRanges.push(zone.lowVelocity === null || zone.highVelocity === null
+        ? null
+        : { low: zone.lowVelocity, high: zone.highVelocity });
     }
     added += zones.length;
     if (zones.length > 1) slot.mode = "";
